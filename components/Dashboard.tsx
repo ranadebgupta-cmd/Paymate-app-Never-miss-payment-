@@ -301,30 +301,30 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const showAppLevelNotification = async (title: string, body: string) => {
-    if (Notification.permission !== "granted") return;
+    try {
+      if (Notification.permission !== "granted") return;
 
-    if ('serviceWorker' in navigator) {
-      try {
-        const registration = await navigator.serviceWorker.ready;
-        if (registration) {
-          registration.showNotification(title, {
-            body: body,
-            icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
-            badge: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
-            vibrate: [200, 100, 200],
-            tag: 'paymate-alert'
-          } as any);
-          return;
-        }
-      } catch (e) {
-        console.error("SW Notification failed", e);
+      if ('serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.ready;
+          if (registration) {
+            registration.showNotification(title, {
+              body: body,
+              icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
+              badge: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
+              vibrate: [200, 100, 200],
+              tag: 'paymate-alert'
+            } as any);
+            return;
+          }
       }
+      
+      new Notification(title, { 
+        body: body, 
+        icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png" 
+      });
+    } catch (e) {
+      console.error("Notification failed", e);
     }
-    
-    new Notification(title, { 
-      body: body, 
-      icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png" 
-    });
   };
 
   const checkDueDates = async (currentBills: Bill[], isEmailEnabled: boolean) => {
@@ -1426,6 +1426,23 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     
     // Construct UPI Params
     const upiParams = `pa=${billToPayNow.upiId || ''}&pn=${encodeURIComponent(billToPayNow.name)}&am=${billToPayNow.totalAmount}&cu=INR&tn=${encodeURIComponent(note)}`;
+
+    // ANDROID INTENT FIX
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    let phonePeUrl = "";
+    if (isAndroid) {
+        // Use Intent URL for Android to forcefully open the app
+        if (isUpiMissing) {
+             // Generic launch intent
+             phonePeUrl = "intent://#Intent;scheme=phonepe;package=com.phonepe.app;end";
+        } else {
+             // Payment specific intent
+             phonePeUrl = `intent://pay?${upiParams}#Intent;scheme=upi;package=com.phonepe.app;end`;
+        }
+    } else {
+        // iOS or others: Use custom scheme
+        phonePeUrl = isUpiMissing ? "phonepe://" : `phonepe://pay?${upiParams}`;
+    }
     
     const handleCopyDetails = () => {
         if (billToPayNow.consumerNumber) {
@@ -1454,7 +1471,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                        <p className="text-[10px] text-gray-400 mb-2">Consumer No: {billToPayNow.consumerNumber}</p>
                        <a 
                           href={`upi://pay?${upiParams}`}
-                          target="_blank" rel="noopener noreferrer"
                           onClick={handleCopyDetails}
                           className="block w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-xs transition"
                        >
@@ -1481,8 +1497,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                {/* Pay via PhonePe App */}
                <div className="mb-2 animate-in slide-in-from-top-2">
                     <a 
-                        href={isUpiMissing ? "phonepe://" : `phonepe://pay?${upiParams}`}
-                        target="_blank"
+                        href={phonePeUrl}
                         rel="noopener noreferrer"
                         onClick={() => setNotification({id:Date.now().toString(), message:"Opening PhonePe...", type:"info"})}
                         className="block w-full bg-[#5f259f] hover:bg-[#4a1c7c] text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2"
@@ -1496,7 +1511,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                <div className="mb-2 animate-in slide-in-from-top-2">
                     <a 
                         href={paytmAppUrl}
-                        target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setNotification({id:Date.now().toString(), message:"Opening Paytm App... Please login if prompted.", type:"info"})}
                         className="block w-full bg-gradient-to-r from-[#00baf2] to-[#002e6e] text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2"
@@ -1549,7 +1563,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                    {/* Specific UPI App Buttons */}
                    <div className={`grid grid-cols-3 gap-2 mb-3 ${isUpiMissing ? 'opacity-50 pointer-events-none' : ''}`}>
                        <a href={`tez://upi/pay?${upiParams}`}
-                          target="_blank" rel="noopener noreferrer"
+                          rel="noopener noreferrer"
                           onClick={() => {
                               handleCopyDetails();
                               setNotification({id:Date.now().toString(), message:"Opening GPay...", type:"info"});
@@ -1559,8 +1573,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                            <img src="https://cdn-icons-png.flaticon.com/512/6124/6124998.png" alt="GPay" className="w-8 h-8 mb-1" />
                            <span className="text-[10px] text-gray-300">GPay</span>
                        </a>
-                       <a href={`phonepe://pay?${upiParams}`}
-                          target="_blank" rel="noopener noreferrer"
+                       <a href={phonePeUrl}
+                          rel="noopener noreferrer"
                           onClick={() => {
                               handleCopyDetails();
                               setNotification({id:Date.now().toString(), message:"Opening PhonePe...", type:"info"});
@@ -1571,7 +1585,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                            <span className="text-[10px] text-gray-300">PhonePe</span>
                        </a>
                        <a href={`paytmmp://pay?${upiParams}`}
-                           target="_blank" rel="noopener noreferrer"
+                           rel="noopener noreferrer"
                            onClick={() => {
                                handleCopyDetails();
                                setNotification({id:Date.now().toString(), message:"Opening Paytm...", type:"info"});
@@ -1586,7 +1600,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                    {/* Generic UPI Button */}
                    <a 
                       href={`upi://pay?${upiParams}`}
-                      target="_blank" rel="noopener noreferrer"
+                      rel="noopener noreferrer"
                       onClick={handleCopyDetails}
                       className={`block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 rounded-xl font-bold text-center transition shadow-lg transform active:scale-95 ${isUpiMissing ? 'opacity-50 pointer-events-none' : ''}`}
                    >
