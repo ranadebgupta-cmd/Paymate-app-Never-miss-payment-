@@ -459,7 +459,12 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
      if (Notification.permission === "granted") {
          showAppLevelNotification("Paymate Test", "This is a test notification from the app.");
      } else {
-         new Notification("Paymate Test", { body: "Browser notification test" });
+         try {
+            new Notification("Paymate Test", { body: "Browser notification test" });
+         } catch (e) {
+             console.log("Notification API error (likely Android WebView)", e);
+             setNotification({ id: Date.now().toString(), message: "Test alert triggered (check status bar)", type: "info" });
+         }
      }
      
      if (emailNotifications) {
@@ -1472,6 +1477,20 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                       </a>
                   </div>
                )}
+
+               {/* Pay via PhonePe App */}
+               <div className="mb-2 animate-in slide-in-from-top-2">
+                    <a 
+                        href={isUpiMissing ? "phonepe://" : `phonepe://pay?${upiParams}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setNotification({id:Date.now().toString(), message:"Opening PhonePe...", type:"info"})}
+                        className="block w-full bg-[#5f259f] hover:bg-[#4a1c7c] text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2"
+                    >
+                        <img src="https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png" alt="PhonePe" className="w-5 h-5 rounded-md" />
+                        Pay via PhonePe App
+                    </a>
+               </div>
 
                {/* Pay via Paytm App */}
                <div className="mb-2 animate-in slide-in-from-top-2">
