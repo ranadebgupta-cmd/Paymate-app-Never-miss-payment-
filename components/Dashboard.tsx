@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storageService';
-import { User, Bill, NotificationItem, BillCategory, Task, EmailLog } from '../types';
+import { User, Bill, NotificationItem, BillCategory, Task, EmailLog, EmailConfig } from '../types';
 import { 
   Plus, CheckCircle, Trash2, LogOut, RefreshCw, 
   CreditCard, Zap, Landmark, Shield, Tv, Receipt, 
@@ -10,7 +10,7 @@ import {
   Flame, Droplets, Wifi, Phone, Home as HomeIcon, Volume2, Mail, Smartphone, PieChart,
   Clock, AlertCircle, FileDown, FileSpreadsheet, Pencil, Filter, X, Save, ExternalLink,
   ListTodo, CheckSquare, Square, Info, HelpCircle, ChevronRight, ChevronDown, Copy,
-  Loader2, History
+  Loader2, History, Key
 } from 'lucide-react';
 import { BillForm } from './BillForm';
 import { TaskForm } from './TaskForm';
@@ -18,6 +18,7 @@ import { NotificationToast } from './NotificationToast';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import emailjs from '@emailjs/browser';
 
 interface Props {
   user: User;
@@ -67,12 +68,26 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailHistory, setEmailHistory] = useState<EmailLog[]>([]);
+  
+  // EmailJS Config State
+  const [emailConfig, setEmailConfig] = useState<EmailConfig>({
+    serviceId: '',
+    templateId: '',
+    publicKey: ''
+  });
+  const [showEmailConfig, setShowEmailConfig] = useState(false);
 
   useEffect(() => {
     // Load settings
     const storedEmailPref = localStorage.getItem('billmate_email_pref');
     if (storedEmailPref !== null) {
       setEmailNotifications(JSON.parse(storedEmailPref));
+    }
+    
+    // Load Email Config
+    const storedEmailConfig = localStorage.getItem('paymate_email_config');
+    if (storedEmailConfig) {
+        setEmailConfig(JSON.parse(storedEmailConfig));
     }
     
     // Load Email History
@@ -117,6 +132,13 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     checkTaskDueDates(userTasks, isEmailEnabled);
   };
 
+  const saveEmailConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    localStorage.setItem('paymate_email_config', JSON.stringify(emailConfig));
+    setNotification({ id: Date.now().toString(), message: 'Email settings saved!', type: 'success' });
+    setShowEmailConfig(false);
+  };
+
   const saveEmailLog = (subject: string, status: 'sent' | 'failed') => {
       const newLog: EmailLog = {
           id: Date.now().toString(),
@@ -136,42 +158,42 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         console.warn("Invalid email address for user");
         return false;
     }
-
-    // Sanitize email
-    const recipient = user.email.trim();
+    
+    if (!emailConfig.serviceId || !emailConfig.templateId || !emailConfig.publicKey) {
+        // Only warn once per session to avoid spamming console
+        console.warn("EmailJS not configured. Please set keys in Settings.");
+        return false;
+    }
 
     try {
-      console.log(`Attempting to send email to ${recipient}...`);
+      console.log(`Sending EmailJS to ${user.email}...`);
       
-      const payload = {
-            _subject: subject,
-            _template: 'table',
-            _captcha: "false", // Must be string "false" for some APIs, CRITICAL to skip captcha
-            _honey: "", // Anti-spam field, leave empty
-            // Data Fields
-            "Alert Details": message,
-            "Amount Due": `₹${detailAmount}`,
-            "Due Date": detailDate,
-            "Sent Via": "Paymate App"
+      // Initialize if needed (though we pass publicKey in send usually, explicit init is safer)
+      emailjs.init(emailConfig.publicKey);
+
+      const templateParams = {
+        to_name: user.name || "User",
+        to_email: user.email, // Ensure your template uses {{to_email}}
+        subject: subject,
+        message: message,
+        bill_name: subject,
+        amount: detailAmount,
+        due_date: detailDate
       };
 
-      const response = await fetch(`https://formsubmit.co/ajax/${recipient}`, {
-        method: "POST",
-        headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await emailjs.send(
+        emailConfig.serviceId,
+        emailConfig.templateId,
+        templateParams,
+        emailConfig.publicKey
+      );
       
-      const result = await response.json();
-      console.log("Email Result:", result);
-      
-      if (response.ok) {
+      if (response.status === 200) {
+          console.log('Email sent successfully:', response);
           saveEmailLog(subject, 'sent');
           return true;
       } else {
-          console.error("Email API Error:", result);
+          console.error('Email failed:', response);
           saveEmailLog(subject, 'failed');
           return false;
       }
@@ -187,8 +209,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
     
-    // Key structure change: We now store object { [billId]: { count: number, lastAlertTime: number } }
-    // Using a new key suffix 'freq' to avoid conflicts with old array-based data
     const alertKey = `billmate_alerts_freq_${todayStr}`;
     
     interface DailyAlertRecord {
@@ -250,7 +270,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
       }
 
       if (message) {
-        // Append retry count info to log or message if needed, but keeping UI clean
         let emailSent = false;
         if (isEmailEnabled) {
              const success = await sendRealEmail(`Bill Alert: ${bill.name}`, message, bill.totalAmount.toString(), bill.dueDate);
@@ -277,7 +296,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         };
         
         alertTriggered = true;
-        break; // Crucial: Stop after one alert to avoid machine-gun effect. Next pass (in 1 min) will check next bill if applicable.
+        break; 
       }
     }
 
@@ -288,8 +307,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
 
   const checkTaskDueDates = async (currentTasks: Task[], isEmailEnabled: boolean) => {
     const now = new Date();
-    
-    // Store alerts as composite keys: 'taskId_reminder' or 'taskId_due'
     const notifiedKey = 'paymate_task_alerts';
     let notifiedItems: string[] = [];
     try {
@@ -340,7 +357,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
       }
 
       // 2. Check Actual Due Date (Due Now / Overdue)
-      // Only check if we haven't already triggered the reminder for this same task in this loop cycle
       if (!triggered) {
         const dueId = `${task.id}_due`;
         if (now >= due && !notifiedItems.includes(dueId)) {
@@ -371,8 +387,6 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         }
       }
 
-      // Important: Stop after finding ONE alert to play. 
-      // This prevents 10 tasks from stacking 10 notification sounds instantly.
       if (triggered) {
           break;
       }
@@ -410,6 +424,12 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const handleTestAlert = async () => {
+    if (!emailConfig.serviceId) {
+        setNotification({ id: Date.now().toString(), message: 'Please configure EmailJS keys first!', type: 'warning' });
+        setShowEmailConfig(true);
+        return;
+    }
+
     const msg = 'This is a test alert from Paymate.';
     
     if (Notification.permission === "granted") {
@@ -417,15 +437,15 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     }
 
     if (emailNotifications) {
-         setNotification({ id: Date.now().toString(), message: 'Sending test email to ' + user.email + '...', type: 'info' });
+         setNotification({ id: Date.now().toString(), message: 'Sending test email...', type: 'info' });
          setIsSendingEmail(true);
          const success = await sendRealEmail("Test Alert", "This is a test email from Paymate to verify your setup.", "0.00", new Date().toISOString().split('T')[0]);
          setIsSendingEmail(false);
          
          if (success) {
-            setNotification({ id: Date.now().toString(), message: 'Email Sent! Check your SPAM folder for "Activate FormSubmit".', type: 'success' });
+            setNotification({ id: Date.now().toString(), message: 'Email Sent Successfully!', type: 'success' });
          } else {
-             setNotification({ id: Date.now().toString(), message: 'Test email failed. Check settings/network.', type: 'warning' });
+             setNotification({ id: Date.now().toString(), message: 'Test email failed. Check API keys.', type: 'warning' });
          }
     } else {
          setNotification({ id: Date.now().toString(), message: 'Test audio alert played (Email disabled)', type: 'info' });
@@ -596,10 +616,10 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
          <div className="space-y-1 mb-8">
            <h3 className="font-bold text-white mb-3 text-lg">Frequently Asked Questions</h3>
            <FAQItem question="How do I scan a bill?" answer="Go to the Bills tab and click the '+' button. In the form, tap the 'Scan Bill' box to take a photo or upload a PDF. Our AI will automatically extract the details for you." />
-           <FAQItem question="Why are email alerts not working?" answer="We use a secure service to send alerts to your registered email. Check your inbox (and spam folder) for an 'Action Required' or 'Activate FormSubmit' email. You must click 'Activate' once for the first email to start receiving alerts." />
-           <FAQItem question="Is my data secure?" answer="Yes! Paymate stores all your financial data locally on your device using LocalStorage. We do not have a backend database, so your private information never leaves your phone unless you enable email alerts." />
-           <FAQItem question="How do I install the app?" answer="On Android, tap 'Install' when prompted or use the Chrome menu 'Install App'. On iOS, tap the 'Share' button in Safari and select 'Add to Home Screen'." />
-            <FAQItem question="How do recurring bills work?" answer="When adding a bill, check 'Repeat Monthly'. Once you mark that bill as 'Paid', a new bill for the next month is automatically created with the same details." />
+           <FAQItem question="Why use EmailJS?" answer="EmailJS is a reliable third-party service that connects to your Gmail/Outlook to send emails from your own account. It requires a free setup." />
+           <FAQItem question="How do I get my API Keys?" answer="1. Sign up at emailjs.com (Free). 2. Add an 'Email Service' (e.g., Gmail). 3. Create an 'Email Template'. 4. Go to Account > API Keys to get your Public Key." />
+           <FAQItem question="Is my data secure?" answer="Yes! Paymate stores all your financial data locally on your device using LocalStorage. We do not have a backend database." />
+           <FAQItem question="How do recurring bills work?" answer="When adding a bill, check 'Repeat Monthly'. Once you mark that bill as 'Paid', a new bill for the next month is automatically created with the same details." />
          </div>
   
          <div className="bg-gray-800/50 p-5 rounded-xl border border-gray-700/50">
@@ -930,10 +950,53 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                 <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
                     <div className="flex items-center gap-2 text-indigo-300 font-semibold mb-2"><Mail size={18} /> Email Alerts</div>
                     <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                        We use a free secure service to send alerts directly to <strong>{user.email}</strong>. 
-                        <br/><br/>
-                        <span className="text-yellow-400">Important:</span> The first time you trigger a test alert, check your inbox (or spam) for an "Activate FormSubmit" email. You must click Activate once to start receiving future notifications.
+                        To receive alerts, you must configure your <strong>EmailJS</strong> keys below.
+                        <br/>
+                        Sign up for free at <a href="https://www.emailjs.com" target="_blank" className="text-blue-400 underline">emailjs.com</a>.
                     </p>
+                    
+                    {!showEmailConfig ? (
+                        <button onClick={() => setShowEmailConfig(true)} className="text-sm bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white font-medium flex items-center gap-2">
+                            <Key size={14} /> Configure Keys
+                        </button>
+                    ) : (
+                        <form onSubmit={saveEmailConfig} className="space-y-3 mt-4 bg-black/20 p-4 rounded-lg">
+                            <div>
+                                <label className="text-xs text-gray-400">Service ID</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
+                                    placeholder="service_xxxxx" 
+                                    value={emailConfig.serviceId}
+                                    onChange={e => setEmailConfig({...emailConfig, serviceId: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Template ID</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
+                                    placeholder="template_xxxxx" 
+                                    value={emailConfig.templateId}
+                                    onChange={e => setEmailConfig({...emailConfig, templateId: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400">Public Key (User ID)</label>
+                                <input 
+                                    type="text" 
+                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
+                                    placeholder="user_xxxxx" 
+                                    value={emailConfig.publicKey}
+                                    onChange={e => setEmailConfig({...emailConfig, publicKey: e.target.value})}
+                                />
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <button type="submit" className="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded text-xs font-bold text-white">Save</button>
+                                <button type="button" onClick={() => setShowEmailConfig(false)} className="bg-gray-700 px-3 py-1.5 rounded text-xs text-white">Cancel</button>
+                            </div>
+                        </form>
+                    )}
                 </div>
 
                 <div onClick={toggleEmailNotifications} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-xl cursor-pointer hover:bg-gray-800 transition">
