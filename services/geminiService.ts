@@ -1,10 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Bill, BillCategory } from "../types";
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@4.2.67/build/pdf.worker.min.mjs`;
 
 // Note: In a production app, the API key should be proxy-ed through a backend.
 // We assume process.env.API_KEY is available as per instructions.
@@ -58,12 +54,21 @@ export interface ExtractedBillData {
  */
 export const processPdfFile = async (file: File, password?: string): Promise<{ type: 'text' | 'image', data: string } | null> => {
   try {
+    // Dynamically import PDF.js to avoid startup crashes if the environment struggles with large bundles or top-level await
+    const pdfjsLib = await import('pdfjs-dist');
+    const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+    
+    // Set worker source
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+
     const arrayBuffer = await file.arrayBuffer();
     
     // Load PDF
     const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
-        password: password
+        password: password,
+        // Critical for APK/Offline: Prevent trying to load fonts from external CDNs which might fail or block rendering
+        disableFontFace: true 
     });
 
     const pdf = await loadingTask.promise;
