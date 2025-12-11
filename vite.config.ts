@@ -15,7 +15,10 @@ export default defineConfig(({ mode }) => {
       'process.env': {}
     },
     build: {
-      outDir: 'dist'
+      outDir: 'dist',
+      rollupOptions: {
+        external: ['pdfjs-dist']
+      }
     }
   };
 });
