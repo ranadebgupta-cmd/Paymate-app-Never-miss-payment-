@@ -54,12 +54,16 @@ export interface ExtractedBillData {
  */
 export const processPdfFile = async (file: File, password?: string): Promise<{ type: 'text' | 'image', data: string } | null> => {
   try {
-    // Dynamically import PDF.js to avoid startup crashes if the environment struggles with large bundles or top-level await
-    const pdfjsLib = await import('pdfjs-dist');
-    const workerModule = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+    // Dynamically import PDF.js
+    // We use 'import *' to ensure we capture the module correctly from esm.sh
+    const pdfjsModule = await import('pdfjs-dist');
     
-    // Set worker source
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+    // Handle ESM vs CJS export differences (esm.sh sometimes puts default in .default)
+    const pdfjsLib = pdfjsModule.default || pdfjsModule;
+
+    // CRITICAL: Ensure the worker version matches the installed package version (4.2.67)
+    // Using an incompatible worker version (like 5.x) causes immediate failure.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/build/pdf.worker.min.mjs`;
 
     const arrayBuffer = await file.arrayBuffer();
     
@@ -67,8 +71,11 @@ export const processPdfFile = async (file: File, password?: string): Promise<{ t
     const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
         password: password,
-        // Critical for APK/Offline: Prevent trying to load fonts from external CDNs which might fail or block rendering
-        disableFontFace: true 
+        // Use CDN for standard fonts to prevent "CMaps" errors in offline/mobile envs
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.2.67/standard_fonts/',
+        disableFontFace: true, // Critical for APK/WebView stability to prevent native font loading crashes
     });
 
     const pdf = await loadingTask.promise;
@@ -77,19 +84,29 @@ export const processPdfFile = async (file: File, password?: string): Promise<{ t
     
     // Try Extracting Text first (Cheaper & Faster)
     for (let i = 1; i <= maxPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
-        fullText += `--- Page ${i} ---\n${pageText}\n`;
+        try {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            // Filter out empty strings and join
+            const pageText = textContent.items
+                .map((item: any) => item.str)
+                .filter(str => str.trim().length > 0)
+                .join(' ');
+            fullText += `--- Page ${i} ---\n${pageText}\n`;
+        } catch (e) {
+            console.warn(`Error extracting text from page ${i}`, e);
+        }
     }
 
+    console.log("Extracted Text Length:", fullText.length);
+
     // Heuristic: If we extracted a good amount of text, it's a digital PDF.
-    // If text is very short/empty, it's likely a scanned image inside a PDF.
-    if (fullText.length > 50) {
+    if (fullText.trim().length > 50) {
         return { type: 'text', data: fullText };
     }
 
     // Fallback: Scanned PDF -> Render Page 1 to Image
+    console.log("Text extraction failed or insufficient. Switching to OCR (Image Rendering).");
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 2.0 }); // High res for OCR
     const canvas = document.createElement('canvas');
@@ -109,7 +126,8 @@ export const processPdfFile = async (file: File, password?: string): Promise<{ t
     if (error.name === 'PasswordException') {
         throw new Error('PASSWORD_REQUIRED');
     }
-    console.error("PDF Processing Error", error);
+    console.error("PDF Processing Error details:", error);
+    // Throw a generic error to be caught by UI
     throw new Error('PDF_PROCESSING_FAILED');
   }
 };
@@ -119,12 +137,14 @@ export const extractBillDetails = async (inputData: string, inputType: 'base64_i
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     const basePrompt = `
-      Analyze this bill/invoice data. Extract the following details in JSON format:
+      Analyze this bill/invoice data carefully. Extract the following details in JSON format.
+      
+      CRITICAL FIELDS TO FIND:
       1. 'name': The biller name, bank name, or merchant.
-      2. 'totalAmount': The total amount due (number only).
-      3. 'minDueAmount': The minimum due amount if available, otherwise 0.
+      2. 'totalAmount': The "Total Amount Due", "Closing Balance", or "Amount Payable". Return ONLY the number.
+      3. 'minDueAmount': Look for "Minimum Due", "Min Amount", or "MAD". If NOT found, return 0.
       4. 'dueDate': The due date in EXACT 'YYYY-MM-DD' format. If not found, estimate based on statement date + 20 days.
-      5. 'category': Choose the EXACT best fit from this list: 'Credit Card', 'Electricity', 'Gas', 'Water', 'Internet', 'Telephone', 'Insurance', 'Rent', 'Subscription', 'Loan', 'Other'.
+      5. 'category': Choose the EXACT best fit from: 'Credit Card', 'Electricity', 'Gas', 'Water', 'Internet', 'Telephone', 'Insurance', 'Rent', 'Subscription', 'Loan', 'Other'.
       6. 'paymentUrl': Any direct website link found for bill payment (starts with http/https). If none, leave empty.
 
       Return ONLY the JSON object. Do not wrap in markdown code blocks.

@@ -118,6 +118,7 @@ const FAQItem = ({ question, answer }: { question: string, answer: string }) => 
 };
 
 export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
+  // ... (Keep existing state)
   const [bills, setBills] = useState<Bill[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   
@@ -130,7 +131,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   const [notification, setNotification] = useState<NotificationItem | null>(null);
   const [billToDelete, setBillToDelete] = useState<string | null>(null);
   const [billToTogglePay, setBillToTogglePay] = useState<Bill | null>(null);
-  const [billToPayNow, setBillToPayNow] = useState<Bill | null>(null); // State for Payment Gateway
+  const [billToPayNow, setBillToPayNow] = useState<Bill | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   
@@ -328,6 +329,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const checkDueDates = async (currentBills: Bill[], isEmailEnabled: boolean) => {
+    // ... (Keep existing logic)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
@@ -373,6 +375,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const checkTaskDueDates = async (currentTasks: Task[], isEmailEnabled: boolean) => {
+    // ... (Keep existing logic)
      const now = new Date();
     const notifiedKey = 'paymate_task_alerts';
     let notifiedItems: string[] = JSON.parse(localStorage.getItem(notifiedKey) || '[]');
@@ -421,6 +424,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
   
   const requestNotificationPermission = async () => {
+    // ... (Keep existing logic)
     if (!("Notification" in window)) {
       setNotification({ id: Date.now().toString(), message: "This browser does not support notifications", type: "warning" });
       return;
@@ -476,6 +480,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const addToGoogleCalendar = (title: string, dueDate: string, details: string = '') => {
+    // ... (Keep existing logic)
     // Set time to 09:00 AM local time on the due date
     const d = new Date(dueDate);
     d.setHours(9, 0, 0, 0);
@@ -509,6 +514,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
   
   const handleSaveTask = (task: Task) => {
+    // ... (Keep existing logic)
     if (editingTask) {
         storageService.updateTask(task);
         setNotification({ id: Date.now().toString(), message: 'Task updated!', type: 'success' });
@@ -542,6 +548,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const executeTogglePaid = () => {
+    // ... (Keep existing logic)
     if (!billToTogglePay) return;
     
     const updatedBill = { ...billToTogglePay, isPaid: !billToTogglePay.isPaid };
@@ -579,6 +586,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
   
   const handleToggleTask = (task: Task) => {
+      // ... (Keep existing logic)
       const updatedTask = { ...task, isCompleted: !task.isCompleted };
       storageService.updateTask(updatedTask);
       
@@ -641,16 +649,18 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         doc.text(`Paid Amount: ${paid.toFixed(2)}`, 14, 52);
         doc.text(`Pending Amount: ${pending.toFixed(2)}`, 14, 58);
 
+        // Modified Table Data to include Minimum Due Amount
         const tableData = bills.map(b => [
             b.name, 
             b.category, 
             b.dueDate, 
-            b.totalAmount.toFixed(2), 
+            b.totalAmount.toFixed(2),
+            b.minDueAmount > 0 ? b.minDueAmount.toFixed(2) : '-',
             b.isPaid ? "PAID" : "PENDING"
         ]);
 
         autoTable(doc, {
-            head: [['Bill Name', 'Category', 'Due Date', 'Amount', 'Status']],
+            head: [['Bill Name', 'Category', 'Due Date', 'Total', 'Min Due', 'Status']],
             body: tableData,
             startY: 65,
             theme: 'grid',
@@ -672,6 +682,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
             "Bill Name": b.name,
             "Category": b.category,
             "Total Amount": b.totalAmount,
+            "Min Due": b.minDueAmount,
             "Due Date": b.dueDate,
             "Status": b.isPaid ? "Paid" : "Pending",
             "Recurring": b.isRecurring ? "Yes" : "No"
@@ -687,7 +698,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     }
   };
   
-  // Smart Link Detector
+  // ... (Keep existing detectPaymentPlatform and helper functions)
   const detectPaymentPlatform = (bill: Bill) => {
       // 1. Check custom URL
       if (bill.paymentUrl) return { url: bill.paymentUrl, name: 'Biller Website' };
@@ -710,7 +721,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   // --- Render Helpers ---
 
   const renderHome = () => {
-    // 1. Calculate Stats
+      // ... (Keep existing Home render logic unchanged)
+      // 1. Calculate Stats
     const totalDue = bills.filter(b => !b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
     const totalMinDue = bills.filter(b => !b.isPaid).reduce((sum, b) => sum + (b.minDueAmount || 0), 0);
     const overdueCount = bills.filter(b => !b.isPaid && new Date(b.dueDate) < new Date(new Date().setHours(0,0,0,0))).length;
@@ -885,7 +897,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
 
   const renderBillList = () => {
-    const filteredBills = bills.filter(bill => {
+     // ... (Keep existing logic)
+      const filteredBills = bills.filter(bill => {
       const matchesSearch = bill.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             bill.category.toLowerCase().includes(searchQuery.toLowerCase());
       
@@ -1022,7 +1035,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
   
   const renderTasks = () => {
-    const sortedTasks = [...tasks].sort((a,b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+      // ... (Keep existing logic)
+      const sortedTasks = [...tasks].sort((a,b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
     
     return (
       <div className="space-y-4 pb-24 animate-in fade-in duration-500">
@@ -1083,7 +1097,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   }
 
   const renderReports = () => {
-     const total = bills.reduce((sum, b) => sum + b.totalAmount, 0);
+    // ... (Keep existing logic)
+         const total = bills.reduce((sum, b) => sum + b.totalAmount, 0);
      const paid = bills.filter(b => b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
      const pending = total - paid;
      const percentage = total > 0 ? Math.round((paid / total) * 100) : 0;
@@ -1151,7 +1166,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   }
   
   const renderSettings = () => {
-    return (
+      // ... (Keep existing logic)
+       return (
         <div className="space-y-6 pb-24 animate-in fade-in duration-500">
              <h2 className="text-xl font-bold flex items-center gap-2 mb-4"><Settings className="text-gray-400"/> Settings</h2>
 
@@ -1360,6 +1376,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   };
   
   const renderAboutModal = () => (
+      // ... (Keep existing logic)
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="glass-panel max-w-sm w-full p-6 rounded-2xl relative">
               <button onClick={() => setShowAbout(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20}/></button>
@@ -1387,6 +1404,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   );
   
   const renderHelpModal = () => (
+      // ... (Keep existing logic)
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="glass-panel max-w-md w-full p-6 rounded-2xl relative max-h-[80vh] overflow-y-auto">
               <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20}/></button>
@@ -1410,6 +1428,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   
   // Render Smart Payment Modal
   const renderPaymentModal = () => {
+    // ... (Keep existing logic)
     if (!billToPayNow) return null;
     
     const detectedPlatform = detectPaymentPlatform(billToPayNow);
