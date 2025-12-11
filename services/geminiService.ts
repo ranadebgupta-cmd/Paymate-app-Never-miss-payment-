@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Bill, BillCategory } from "../types";
 
@@ -42,6 +43,7 @@ export interface ExtractedBillData {
   minDueAmount: number;
   dueDate: string;
   category: BillCategory;
+  paymentUrl?: string;
 }
 
 export const extractBillDetails = async (base64Data: string, mimeType: string): Promise<ExtractedBillData | null> => {
@@ -55,6 +57,7 @@ export const extractBillDetails = async (base64Data: string, mimeType: string): 
       3. 'minDueAmount': The minimum due amount if available, otherwise 0.
       4. 'dueDate': The due date in EXACT 'YYYY-MM-DD' format. If not found, estimate based on statement date + 20 days.
       5. 'category': Choose the EXACT best fit from this list: 'Credit Card', 'Electricity', 'Gas', 'Water', 'Internet', 'Telephone', 'Insurance', 'Rent', 'Subscription', 'Loan', 'Other'.
+      6. 'paymentUrl': Any direct website link found for bill payment (starts with http/https). If none, leave empty.
 
       Return ONLY the JSON object. Do not wrap in markdown code blocks.
     `;

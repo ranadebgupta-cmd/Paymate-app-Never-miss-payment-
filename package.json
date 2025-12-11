@@ -9,14 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@emailjs/browser": "^4.3.3",
     "@google/genai": "*",
+    "@emailjs/browser": "^4.4.1",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
     "lucide-react": "^0.378.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "qrcode.react": "^3.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

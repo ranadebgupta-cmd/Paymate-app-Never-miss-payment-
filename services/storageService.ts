@@ -75,7 +75,11 @@ export const storageService = {
         minDueAmount: b.minDueAmount,
         dueDate: b.dueDate,
         isPaid: b.isPaid,
-        isRecurring: b.isRecurring ?? false
+        isRecurring: b.isRecurring ?? false,
+        upiId: b.upiId || '',
+        paymentUrl: b.paymentUrl || '',
+        consumerNumber: b.consumerNumber || '',
+        billerId: b.billerId || ''
       }));
 
       return allBills.filter(b => b.userId === userId).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
@@ -130,7 +134,8 @@ export const storageService = {
         title: t.title,
         dueDate: t.dueDate,
         reminderDate: t.reminderDate || undefined, // Ensure field exists
-        isCompleted: t.isCompleted
+        isCompleted: t.isCompleted,
+        isRecurring: t.isRecurring || false
       }));
       return allTasks.filter(t => t.userId === userId).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
     } catch (e) {

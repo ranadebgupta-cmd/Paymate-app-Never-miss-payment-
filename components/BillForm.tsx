@@ -1,12 +1,13 @@
+
 import React, { useState, useRef } from 'react';
-import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, AlertCircle, CheckSquare, Smartphone, Link as LinkIcon, Hash } from 'lucide-react';
 import { Bill, BillCategory } from '../types';
 import { extractBillDetails } from '../services/geminiService';
 
 interface Props {
   userId: string;
   onClose: () => void;
-  onSave: (bill: Bill) => void;
+  onSave: (bill: Bill, addToCalendar: boolean) => void;
   initialData?: Bill;
 }
 
@@ -30,8 +31,13 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
   const [totalAmount, setTotalAmount] = useState(initialData?.totalAmount.toString() || '');
   const [minDue, setMinDue] = useState(initialData?.minDueAmount.toString() || '');
   const [dueDate, setDueDate] = useState(initialData?.dueDate || '');
+  const [upiId, setUpiId] = useState(initialData?.upiId || '');
+  const [paymentUrl, setPaymentUrl] = useState(initialData?.paymentUrl || '');
+  const [consumerNumber, setConsumerNumber] = useState(initialData?.consumerNumber || '');
+  const [billerId, setBillerId] = useState(initialData?.billerId || '');
   const [isRecurring, setIsRecurring] = useState(initialData?.isRecurring || false);
   const [showPastDueConfirm, setShowPastDueConfirm] = useState(false);
+  const [addToCalendar, setAddToCalendar] = useState(!initialData); // Default true for new bills
   
   // Scanning State
   const [isScanning, setIsScanning] = useState(false);
@@ -67,6 +73,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
           if (extractedData.totalAmount) setTotalAmount(extractedData.totalAmount.toString());
           if (extractedData.minDueAmount) setMinDue(extractedData.minDueAmount.toString());
           if (extractedData.dueDate) setDueDate(extractedData.dueDate);
+          if (extractedData.paymentUrl) setPaymentUrl(extractedData.paymentUrl);
           
           // Validate category before setting
           if (extractedData.category && CATEGORIES.includes(extractedData.category)) {
@@ -109,9 +116,13 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
       minDueAmount: parseFloat(minDue) || 0,
       dueDate,
       isPaid: initialData?.isPaid || false,
-      isRecurring
+      isRecurring,
+      upiId: upiId.trim(),
+      paymentUrl: paymentUrl.trim(),
+      consumerNumber: consumerNumber.trim(),
+      billerId: billerId.trim()
     };
-    onSave(newBill);
+    onSave(newBill, addToCalendar);
     onClose();
   };
 
@@ -215,24 +226,42 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
               placeholder={category === 'Credit Card' ? "e.g. HDFC Regalia" : "e.g. Home Internet"}
             />
           </div>
+          
+          {/* BBPS Data Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Consumer / Account No</label>
+                <div className="relative">
+                   <span className="absolute left-3 top-3 text-gray-400"><Hash size={18} /></span>
+                   <input 
+                     type="text" 
+                     value={consumerNumber} 
+                     onChange={e => setConsumerNumber(e.target.value)} 
+                     className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500"
+                     placeholder="e.g. 5500123456"
+                   />
+                </div>
+             </div>
+             
+             <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Total Amount (INR)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-3 text-gray-400">₹</span>
+                  <input 
+                    type="number" 
+                    required 
+                    min="0"
+                    step="0.01"
+                    value={totalAmount} 
+                    onChange={e => setTotalAmount(e.target.value)} 
+                    className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-8 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="0.00"
+                  />
+                </div>
+             </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Total Amount (INR)</label>
-              <div className="relative">
-                <span className="absolute left-3 top-3 text-gray-400">₹</span>
-                <input 
-                  type="number" 
-                  required 
-                  min="0"
-                  step="0.01"
-                  value={totalAmount} 
-                  onChange={e => setTotalAmount(e.target.value)} 
-                  className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-8 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  placeholder="0.00"
-                />
-              </div>
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">
                 {category === 'Credit Card' || category === 'Loan' ? 'Min Due (INR)' : 'Min Due (Optional)'}
@@ -250,34 +279,79 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
                 />
               </div>
             </div>
+            <div>
+                 <label className="block text-sm font-medium text-gray-300 mb-1">Biller UPI ID (Optional)</label>
+                 <div className="relative">
+                    <span className="absolute left-3 top-3 text-gray-400"><Smartphone size={18} /></span>
+                    <input 
+                      type="text" 
+                      value={upiId} 
+                      onChange={e => setUpiId(e.target.value)} 
+                      className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500"
+                      placeholder="e.g. electric@sbi"
+                    />
+                 </div>
+              </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Due Date</label>
-            <div className="relative">
-                <span className="absolute left-3 top-3 text-gray-400"><Calendar size={18} /></span>
-                <input 
-                  type="date" 
-                  required 
-                  value={dueDate} 
-                  onChange={e => setDueDate(e.target.value)} 
-                  className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none date-input-white"
-                />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                 <label className="block text-sm font-medium text-gray-300 mb-1">Payment Website / Link</label>
+                 <div className="relative">
+                    <span className="absolute left-3 top-3 text-gray-400"><LinkIcon size={18} /></span>
+                    <input 
+                      type="url" 
+                      value={paymentUrl} 
+                      onChange={e => setPaymentUrl(e.target.value)} 
+                      className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500"
+                      placeholder="e.g. https://billpay.com"
+                    />
+                 </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Due Date</label>
+                <div className="relative">
+                    <span className="absolute left-3 top-3 text-gray-400"><Calendar size={18} /></span>
+                    <input 
+                      type="date" 
+                      required 
+                      value={dueDate} 
+                      onChange={e => setDueDate(e.target.value)} 
+                      className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none date-input-white"
+                    />
+                </div>
+              </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700">
+              <input 
+                type="checkbox" 
+                id="recurring"
+                checked={isRecurring}
+                onChange={e => setIsRecurring(e.target.checked)}
+                className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
+              />
+              <label htmlFor="recurring" className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
+                <Repeat size={16} className="text-indigo-400" />
+                Repeat Monthly
+              </label>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700">
-            <input 
-              type="checkbox" 
-              id="recurring"
-              checked={isRecurring}
-              onChange={e => setIsRecurring(e.target.checked)}
-              className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
-            />
-            <label htmlFor="recurring" className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
-              <Repeat size={16} className="text-indigo-400" />
-              Repeat Monthly
-            </label>
+            <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700">
+              <input 
+                type="checkbox" 
+                id="calendar"
+                checked={addToCalendar}
+                onChange={e => setAddToCalendar(e.target.checked)}
+                className="w-5 h-5 rounded border-gray-600 text-indigo-500 focus:ring-indigo-500 bg-gray-700"
+              />
+              <label htmlFor="calendar" className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
+                <CheckSquare size={16} className="text-green-400" />
+                Add to Google Calendar (Daily Reminder)
+              </label>
+            </div>
           </div>
 
           <button type="submit" className="w-full mt-4 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform transition hover:-translate-y-0.5">

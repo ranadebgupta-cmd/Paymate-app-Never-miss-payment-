@@ -22,13 +22,17 @@ export type BillCategory =
 export interface Bill {
   id: string;
   userId: string;
-  name: string; // Generalized from cardName
+  name: string;
   category: BillCategory;
   totalAmount: number;
   minDueAmount: number;
   dueDate: string; // ISO Date string YYYY-MM-DD
   isPaid: boolean;
   isRecurring: boolean;
+  upiId?: string; // Virtual Payment Address for UPI payments
+  paymentUrl?: string; // Direct link to biller's payment portal
+  consumerNumber?: string; // BBPS Consumer ID / Account No
+  billerId?: string; // BBPS Biller ID
 }
 
 export interface Task {
@@ -38,6 +42,7 @@ export interface Task {
   dueDate: string; // ISO Date-Time string
   reminderDate?: string; // ISO Date-Time string for the specific alert
   isCompleted: boolean;
+  isRecurring?: boolean;
 }
 
 export type ViewState = 'LOGIN' | 'SIGNUP' | 'FORGOT_PASSWORD' | 'DASHBOARD';
@@ -57,7 +62,9 @@ export interface EmailLog {
 }
 
 export interface EmailConfig {
-  serviceId: string;
-  templateId: string;
-  publicKey: string;
+  provider: 'simple' | 'emailjs';
+  // EmailJS specific
+  serviceId?: string;
+  templateId?: string;
+  publicKey?: string;
 }

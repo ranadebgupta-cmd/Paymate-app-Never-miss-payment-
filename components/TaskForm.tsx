@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, CheckSquare, Clock, Bell } from 'lucide-react';
+import { X, CheckSquare, Clock, Bell, Calendar, Repeat } from 'lucide-react';
 import { Task } from '../types';
 
 interface Props {
@@ -13,23 +13,40 @@ interface Props {
 export const TaskForm: React.FC<Props> = ({ userId, onClose, onSave, initialData }) => {
   const [title, setTitle] = useState(initialData?.title || '');
   const [dueDate, setDueDate] = useState(initialData?.dueDate || '');
+  const [isRecurring, setIsRecurring] = useState(initialData?.isRecurring || false);
   
   // Calculate initial offset if reminderDate exists
   const getInitialOffset = () => {
-    if (!initialData?.reminderDate || !initialData.dueDate) return '0';
+    if (!initialData?.reminderDate) return 'none';
+    if (!initialData.dueDate) return 'custom'; // Reminder exists but due date missing/changed? Default to custom.
+
     const due = new Date(initialData.dueDate).getTime();
     const remind = new Date(initialData.reminderDate).getTime();
     const diffMins = Math.round((due - remind) / 60000);
     
     // Map closest offset options
-    if (diffMins <= 0) return '0';
+    if (diffMins <= 1 && diffMins >= -1) return '0';
     if (diffMins === 15) return '15';
     if (diffMins === 60) return '60';
     if (diffMins === 1440) return '1440';
-    return '0';
+    return 'custom';
   };
 
   const [reminderOffset, setReminderOffset] = useState(getInitialOffset());
+  
+  const [customReminderDate, setCustomReminderDate] = useState(() => {
+    if (initialData?.reminderDate && getInitialOffset() === 'custom') {
+        const d = new Date(initialData.reminderDate);
+        // Convert UTC ISO to Local datetime-local string format
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const mins = String(d.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${mins}`;
+    }
+    return '';
+  });
 
   const generateId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -43,7 +60,11 @@ export const TaskForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
     
     // Calculate Reminder Date
     let reminderDate: string | undefined;
-    if (dueDate && reminderOffset !== 'none') {
+    
+    if (reminderOffset === 'custom' && customReminderDate) {
+        // Convert local input time back to UTC ISO string for storage/logic
+        reminderDate = new Date(customReminderDate).toISOString();
+    } else if (dueDate && reminderOffset !== 'none') {
         const dueTime = new Date(dueDate).getTime();
         const offsetMins = parseInt(reminderOffset);
         reminderDate = new Date(dueTime - (offsetMins * 60000)).toISOString();
@@ -55,7 +76,8 @@ export const TaskForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
       title,
       dueDate,
       reminderDate,
-      isCompleted: initialData?.isCompleted || false
+      isCompleted: initialData?.isCompleted || false,
+      isRecurring
     };
     onSave(newTask);
     onClose();
@@ -114,8 +136,37 @@ export const TaskForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
                     <option value="15" className="bg-gray-800">15 minutes before</option>
                     <option value="60" className="bg-gray-800">1 hour before</option>
                     <option value="1440" className="bg-gray-800">1 day before</option>
+                    <option value="custom" className="bg-gray-800">Custom Date & Time</option>
                 </select>
              </div>
+             
+             {reminderOffset === 'custom' && (
+                <div className="relative mt-3 animate-in fade-in slide-in-from-top-1">
+                    <span className="absolute left-3 top-3 text-gray-400"><Calendar size={18} /></span>
+                    <input 
+                        type="datetime-local" 
+                        required 
+                        value={customReminderDate} 
+                        onChange={e => setCustomReminderDate(e.target.value)} 
+                        className="w-full bg-gray-800/50 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white focus:ring-2 focus:ring-pink-500 outline-none date-input-white text-sm"
+                        placeholder="Pick reminder time"
+                    />
+                </div>
+             )}
+          </div>
+
+          <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700">
+            <input 
+              type="checkbox" 
+              id="recurring-task"
+              checked={isRecurring}
+              onChange={e => setIsRecurring(e.target.checked)}
+              className="w-5 h-5 rounded border-gray-600 text-pink-500 focus:ring-pink-500 bg-gray-700"
+            />
+            <label htmlFor="recurring-task" className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
+              <Repeat size={16} className="text-pink-400" />
+              Repeat Weekly
+            </label>
           </div>
 
           <button type="submit" className="w-full mt-4 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform transition hover:-translate-y-0.5">

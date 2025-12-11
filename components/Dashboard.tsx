@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storageService';
 import { User, Bill, NotificationItem, BillCategory, Task, EmailLog, EmailConfig } from '../types';
+import { getFinancialAdvice } from '../services/geminiService';
 import { 
   Plus, CheckCircle, Trash2, LogOut, RefreshCw, 
   CreditCard, Zap, Landmark, Shield, Tv, Receipt, 
@@ -10,7 +11,8 @@ import {
   Flame, Droplets, Wifi, Phone, Home as HomeIcon, Volume2, Mail, Smartphone, PieChart,
   Clock, AlertCircle, FileDown, FileSpreadsheet, Pencil, Filter, X, Save, ExternalLink,
   ListTodo, CheckSquare, Square, Info, HelpCircle, ChevronRight, ChevronDown, Copy,
-  Loader2, History, Key
+  Loader2, History, Key, Link, Sparkles, Send, Music, Calendar, TrendingUp, DollarSign,
+  ArrowUpRight, ArrowDownRight, Activity, QrCode, Lock, Globe
 } from 'lucide-react';
 import { BillForm } from './BillForm';
 import { TaskForm } from './TaskForm';
@@ -19,14 +21,88 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import emailjs from '@emailjs/browser';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface Props {
   user: User;
   onLogout: () => void;
 }
 
-type Tab = 'home' | 'bills' | 'tasks' | 'calendar' | 'reports' | 'settings';
+type Tab = 'home' | 'bills' | 'tasks' | 'reports' | 'settings';
 type FilterStatus = 'all' | 'pending' | 'overdue' | 'paid';
+
+const DEFAULT_EMAIL_CONFIG: EmailConfig = {
+    provider: 'simple',
+    serviceId: 'service_f3f9kg1',
+    templateId: '', 
+    publicKey: ''
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+    'Credit Card': '#818cf8', // Indigo-400
+    'Electricity': '#fbbf24', // Amber-400
+    'Gas': '#fb923c', // Orange-400
+    'Water': '#22d3ee', // Cyan-400
+    'Internet': '#a78bfa', // Violet-400
+    'Telephone': '#f472b6', // Pink-400
+    'Rent': '#2dd4bf', // Teal-400
+    'Insurance': '#f87171', // Red-400
+    'Subscription': '#c084fc', // Purple-400
+    'Loan': '#4ade80', // Green-400
+    'Other': '#94a3b8' // Slate-400
+};
+
+// Smart Payment Links Database
+const SMART_LINKS: Record<string, { url: string, name: string }> = {
+    'airtel': { url: 'https://www.airtel.in/pay-bill', name: 'Airtel Thanks' },
+    'jio': { url: 'https://www.jio.com/selfcare/paybill', name: 'MyJio' },
+    'vi': { url: 'https://www.myvi.in/postpaid/quick-bill-pay', name: 'Vi App' },
+    'vodafone': { url: 'https://www.myvi.in/postpaid/quick-bill-pay', name: 'Vi App' },
+    'bsnl': { url: 'https://portal.bsnl.in/myportal/quickpayment.do', name: 'BSNL Portal' },
+    'sbi': { url: 'https://www.onlinesbi.sbi/sbicollect/icollecthome.htm', name: 'SBI Collect' },
+    'hdfc': { url: 'https://www.hdfcbank.com/personal/pay/bill-payments', name: 'HDFC BillPay' },
+    'icici': { url: 'https://www.icicibank.com/personal-banking/payments/bill-payments', name: 'ICICI BillPay' },
+    'axis': { url: 'https://www.axisbank.com/make-payments/bill-payment', name: 'Axis Bank' },
+    'lic': { url: 'https://ebiz.licindia.in/D2CPM/#/DirectPay', name: 'LIC Pay Direct' },
+    'act': { url: 'https://selfcare.actcorp.in/quick-pay', name: 'ACT Fibernet' },
+    'bescom': { url: 'https://www.bescom.co.in/SCP/Myhome.aspx', name: 'BESCOM' },
+    'mahadiscom': { url: 'https://wss.mahadiscom.in/wss/wss_view_pay_bill.aspx', name: 'Mahadiscom' },
+    'netflix': { url: 'https://www.netflix.com/youraccount', name: 'Netflix' },
+    'prime': { url: 'https://www.amazon.in/manage-your-content-and-devices', name: 'Amazon Prime' },
+    'hotstar': { url: 'https://www.hotstar.com/in/subscribe/my-account', name: 'Hotstar' }
+};
+
+// Comprehensive Paytm Links for all categories (Web)
+const AGGREGATOR_LINKS: Record<string, string> = {
+    'Electricity': 'https://paytm.com/electricity-bill-payment',
+    'Credit Card': 'https://paytm.com/credit-card-bill-payment',
+    'Gas': 'https://paytm.com/gas-bill-payment',
+    'Water': 'https://paytm.com/water-bill-payment',
+    'Internet': 'https://paytm.com/broadband-bill-payment',
+    'Telephone': 'https://paytm.com/recharge',
+    'Insurance': 'https://paytm.com/insurance-premium-payment',
+    'Rent': 'https://paytm.com/rent-payment',
+    'Loan': 'https://paytm.com/loan-emi-payment',
+    'Subscription': 'https://paytm.com/subscription-payment',
+    'Other': 'https://paytm.com/challan-bill-payment',
+    'default': 'https://paytm.com/'
+};
+
+// Paytm Native App Deep Links
+const PAYTM_APP_LINKS: Record<string, string> = {
+    'Electricity': 'paytmmp://electricity',
+    'Credit Card': 'paytmmp://credit_card',
+    'Gas': 'paytmmp://gas',
+    'Water': 'paytmmp://water',
+    'Internet': 'paytmmp://broadband',
+    'Telephone': 'paytmmp://mobile_postpaid',
+    'Insurance': 'paytmmp://insurance',
+    'Rent': 'paytmmp://rent_payment',
+    'Loan': 'paytmmp://loan_payment',
+    'Subscription': 'paytmmp://subscription',
+    'Other': 'paytmmp://utilities',
+    'default': 'paytmmp://'
+};
 
 const FAQItem = ({ question, answer }: { question: string, answer: string }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -53,7 +129,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
 
   const [notification, setNotification] = useState<NotificationItem | null>(null);
   const [billToDelete, setBillToDelete] = useState<string | null>(null);
-  const [billToTogglePay, setBillToTogglePay] = useState<Bill | null>(null); // New state for confirmation
+  const [billToTogglePay, setBillToTogglePay] = useState<Bill | null>(null);
+  const [billToPayNow, setBillToPayNow] = useState<Bill | null>(null); // State for Payment Gateway
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   
@@ -69,77 +146,73 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailHistory, setEmailHistory] = useState<EmailLog[]>([]);
+  const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
   
-  // EmailJS Config State
-  const [emailConfig, setEmailConfig] = useState<EmailConfig>({
-    serviceId: '',
-    templateId: '',
-    publicKey: ''
-  });
+  // Config State
+  const [emailConfig, setEmailConfig] = useState<EmailConfig>(DEFAULT_EMAIL_CONFIG);
   const [showEmailConfig, setShowEmailConfig] = useState(false);
 
+  // AI Advice State
+  const [advice, setAdvice] = useState<string>('');
+  const [loadingAdvice, setLoadingAdvice] = useState(false);
+
   useEffect(() => {
-    // Load settings
+    // Sync notification permission on mount
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+
+    // Load global settings
     const storedEmailPref = localStorage.getItem('billmate_email_pref');
     if (storedEmailPref !== null) {
       setEmailNotifications(JSON.parse(storedEmailPref));
     }
     
-    // Load Email Config
-    const storedEmailConfig = localStorage.getItem('paymate_email_config');
-    if (storedEmailConfig) {
-        setEmailConfig(JSON.parse(storedEmailConfig));
+    // Load User-Specific Email Config
+    const userConfigKey = `paymate_email_config_${user.id}`;
+    const storedUserConfig = localStorage.getItem(userConfigKey);
+    
+    if (storedUserConfig) {
+        const parsed = JSON.parse(storedUserConfig);
+        if (!parsed.provider) parsed.provider = 'simple';
+        setEmailConfig(parsed);
     }
     
     // Load Email History
     const history = localStorage.getItem('paymate_email_history');
-    if (history) {
-        setEmailHistory(JSON.parse(history));
-    }
+    if (history) setEmailHistory(JSON.parse(history));
     
     loadBills();
     loadTasks();
 
-    // Check alerts periodically (every minute)
+    // Periodic Check (every 60s)
     const interval = setInterval(() => {
-      // Re-read settings inside interval to get fresh value if it changed
       const currentEmailPref = localStorage.getItem('billmate_email_pref');
       const isEnabled = currentEmailPref !== null ? JSON.parse(currentEmailPref) : true;
-      
-      // Check Tasks
       checkTaskDueDates(storageService.getTasks(user.id), isEnabled);
-      
-      // Check Bills (now supports twice daily checks)
       checkDueDates(storageService.getBills(user.id), isEnabled);
     }, 60000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [user.id]);
 
   const loadBills = () => {
     const userBills = storageService.getBills(user.id);
     setBills(userBills);
-    const storedEmailPref = localStorage.getItem('billmate_email_pref');
-    const isEmailEnabled = storedEmailPref !== null ? JSON.parse(storedEmailPref) : true;
-    checkDueDates(userBills, isEmailEnabled);
   };
 
   const loadTasks = () => {
     const userTasks = storageService.getTasks(user.id);
     setTasks(userTasks);
-    // Initial check
-    const storedEmailPref = localStorage.getItem('billmate_email_pref');
-    const isEmailEnabled = storedEmailPref !== null ? JSON.parse(storedEmailPref) : true;
-    checkTaskDueDates(userTasks, isEmailEnabled);
   };
 
   const saveEmailConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('paymate_email_config', JSON.stringify(emailConfig));
-    setNotification({ id: Date.now().toString(), message: 'Email settings saved!', type: 'success' });
+    localStorage.setItem(`paymate_email_config_${user.id}`, JSON.stringify(emailConfig));
+    setNotification({ id: Date.now().toString(), message: 'Settings saved!', type: 'success' });
     setShowEmailConfig(false);
   };
-
+  
   const saveEmailLog = (subject: string, status: 'sent' | 'failed') => {
       const newLog: EmailLog = {
           id: Date.now().toString(),
@@ -148,1027 +221,1499 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
           subject: subject,
           status: status
       };
-      
-      const updatedHistory = [newLog, ...emailHistory].slice(0, 50); // Keep last 50
+      const updatedHistory = [newLog, ...emailHistory].slice(0, 50);
       setEmailHistory(updatedHistory);
       localStorage.setItem('paymate_email_history', JSON.stringify(updatedHistory));
   };
 
   const sendRealEmail = async (subject: string, message: string, detailAmount: string, detailDate: string) => {
-    if (!user.email || !user.email.includes('@')) {
-        console.warn("Invalid email address for user");
+    const isSimple = emailConfig.provider === 'simple';
+    
+    try {
+        if (isSimple) {
+            // FormSubmit Simple Integration
+            const response = await fetch(`https://formsubmit.co/ajax/${user.email.trim()}`, {
+                method: "POST",
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    _subject: subject,
+                    _template: "box", 
+                    _captcha: "false", 
+                    _honey: "", 
+                    app: "Paymate Bill Manager",
+                    recipient: user.name,
+                    alert_type: subject,
+                    details: message,
+                    amount_due: detailAmount,
+                    due_date: detailDate
+                })
+            });
+            const data = await response.json();
+            const success = response.ok && data.success === "true";
+            
+            saveEmailLog(subject, success ? 'sent' : 'failed');
+            return success;
+        } else {
+            // Advanced EmailJS Integration
+            if (!emailConfig.serviceId || !emailConfig.templateId || !emailConfig.publicKey) return false;
+            
+            const templateParams = {
+                to_name: user.name,
+                to_email: user.email,
+                bill_name: subject,
+                message: message,
+                amount: detailAmount,
+                due_date: detailDate
+            };
+            const result = await emailjs.send(emailConfig.serviceId, emailConfig.templateId, templateParams, emailConfig.publicKey);
+            const success = result.status === 200;
+            saveEmailLog(subject, success ? 'sent' : 'failed');
+            return success;
+        }
+    } catch (e) {
+        console.error("Email send failed", e);
+        const errorMsg = e instanceof Error ? e.message : 'Unknown Error';
+        setNotification({id: Date.now().toString(), message: `Email Error: ${errorMsg}`, type: 'warning'});
+        saveEmailLog(subject, 'failed');
         return false;
+    }
+  };
+  
+  const handleSendActivation = async () => {
+    setIsSendingEmail(true);
+    try {
+       await fetch(`https://formsubmit.co/ajax/${user.email.trim()}`, {
+           method: "POST",
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+               _subject: "Paymate Activation",
+               message: "This is a setup email to activate FormSubmit for Paymate notifications. Please click Activate in the email you receive."
+           })
+       });
+       setNotification({ id: Date.now().toString(), message: 'Activation email sent! Please check your Inbox and Spam folder.', type: 'info' });
+    } catch (e) {
+        setNotification({ id: Date.now().toString(), message: 'Failed to send activation.', type: 'warning' });
+    }
+    setIsSendingEmail(false);
+  };
+
+  const showAppLevelNotification = async (title: string, body: string) => {
+    if (Notification.permission !== "granted") return;
+
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (registration) {
+          registration.showNotification(title, {
+            body: body,
+            icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
+            badge: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png",
+            vibrate: [200, 100, 200],
+            tag: 'paymate-alert'
+          } as any);
+          return;
+        }
+      } catch (e) {
+        console.error("SW Notification failed", e);
+      }
     }
     
-    if (!emailConfig.serviceId || !emailConfig.templateId || !emailConfig.publicKey) {
-        // Only warn once per session to avoid spamming console
-        console.warn("EmailJS not configured. Please set keys in Settings.");
-        return false;
-    }
-
-    try {
-      console.log(`Sending EmailJS to ${user.email}...`);
-      
-      // Initialize if needed (though we pass publicKey in send usually, explicit init is safer)
-      emailjs.init(emailConfig.publicKey);
-
-      const templateParams = {
-        to_name: user.name || "User",
-        to_email: user.email, // Ensure your template uses {{to_email}}
-        subject: subject,
-        message: message,
-        bill_name: subject,
-        amount: detailAmount,
-        due_date: detailDate
-      };
-
-      const response = await emailjs.send(
-        emailConfig.serviceId,
-        emailConfig.templateId,
-        templateParams,
-        emailConfig.publicKey
-      );
-      
-      if (response.status === 200) {
-          console.log('Email sent successfully:', response);
-          saveEmailLog(subject, 'sent');
-          return true;
-      } else {
-          console.error('Email failed:', response);
-          saveEmailLog(subject, 'failed');
-          return false;
-      }
-    } catch (error) {
-      console.error("Email Network Error:", error);
-      saveEmailLog(subject, 'failed');
-      return false;
-    }
+    new Notification(title, { 
+      body: body, 
+      icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png" 
+    });
   };
 
   const checkDueDates = async (currentBills: Bill[], isEmailEnabled: boolean) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
-    
+    const todayStr = today.toISOString().split('T')[0];
     const alertKey = `billmate_alerts_freq_${todayStr}`;
-    
-    interface DailyAlertRecord {
-        count: number;
-        lastAlertTime: number;
-    }
-    
-    let dailyRecords: Record<string, DailyAlertRecord> = {};
-    try {
-        const stored = localStorage.getItem(alertKey);
-        if (stored) {
-            dailyRecords = JSON.parse(stored);
-        }
-    } catch {
-        dailyRecords = {};
-    }
+    let dailyRecords: any = {};
+    try { dailyRecords = JSON.parse(localStorage.getItem(alertKey) || '{}'); } catch {}
 
     const sortedBills = [...currentBills].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
     let alertTriggered = false;
     const now = Date.now();
-    const MIN_ALERT_GAP = 4 * 60 * 60 * 1000; // 4 Hours minimum gap between alerts
 
     for (const bill of sortedBills) {
       if (bill.isPaid) continue;
-
       const record = dailyRecords[bill.id] || { count: 0, lastAlertTime: 0 };
-      
-      // If we have alerted 2 or more times today, skip
-      if (record.count >= 2) continue;
+      if (record.count >= 2) continue; 
+      if (record.count > 0 && (now - record.lastAlertTime < 14400000)) continue; 
 
-      // Check if enough time has passed since last alert (if not first alert)
-      if (record.count > 0 && (now - record.lastAlertTime < MIN_ALERT_GAP)) continue;
-
-      // Robust Date Comparison
       const due = new Date(bill.dueDate);
       due.setHours(0, 0, 0, 0);
-      
-      const diffTime = due.getTime() - today.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const diffDays = Math.ceil((due.getTime() - today.getTime()) / (86400000));
       
       let message = '';
       let type: 'warning' | 'info' = 'info';
-
-      // Check strict strings for today to avoid timezone edge cases
       const isDueToday = bill.dueDate === todayStr;
 
-      if (diffDays < 0) {
-        message = `OVERDUE: ${bill.name} was due on ${bill.dueDate}!`;
-        type = 'warning';
-      } else if (isDueToday || diffDays === 0) {
-        message = `URGENT: ${bill.name} is due TODAY!`;
-        type = 'warning';
-      } else if (diffDays === 1) {
-        message = `Reminder: ${bill.name} is due tomorrow.`;
-        type = 'info';
-      } else if (diffDays > 1 && diffDays <= 3) {
-        message = `Upcoming: ${bill.name} is due in ${diffDays} days.`;
-        type = 'info';
-      }
+      if (diffDays < 0) { message = `OVERDUE: ${bill.name}`; type = 'warning'; } 
+      else if (isDueToday || diffDays === 0) { message = `URGENT: ${bill.name} Due Today!`; type = 'warning'; } 
+      else if (diffDays === 1) { message = `Reminder: ${bill.name} due tomorrow`; type = 'info'; }
+      else if (diffDays > 1 && diffDays <= 3) { message = `${bill.name} due in ${diffDays} days`; type = 'info'; }
 
       if (message) {
-        let emailSent = false;
         if (isEmailEnabled) {
-             const success = await sendRealEmail(`Bill Alert: ${bill.name}`, message, bill.totalAmount.toString(), bill.dueDate);
-             if (success) emailSent = true;
+             await sendRealEmail(`Bill Due: ${bill.name}`, message, bill.totalAmount.toString(), bill.dueDate);
         }
-        
-        if (Notification.permission === "granted") {
-          new Notification("Paymate Alert", {
-            body: message,
-            icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png"
-          });
-        }
-        
-        setNotification({
-          id: Date.now().toString(),
-          message: `${message}${emailSent ? ` (Email sent)` : ''}`,
-          type
-        });
-
-        // Update record
-        dailyRecords[bill.id] = {
-            count: record.count + 1,
-            lastAlertTime: now
-        };
-        
+        await showAppLevelNotification("Paymate Bill Alert", message);
+        setNotification({ id: Date.now().toString(), message, type });
+        dailyRecords[bill.id] = { count: record.count + 1, lastAlertTime: now };
         alertTriggered = true;
         break; 
       }
     }
-
-    if (alertTriggered) {
-        localStorage.setItem(alertKey, JSON.stringify(dailyRecords));
-    }
+    if (alertTriggered) localStorage.setItem(alertKey, JSON.stringify(dailyRecords));
   };
 
   const checkTaskDueDates = async (currentTasks: Task[], isEmailEnabled: boolean) => {
-    const now = new Date();
+     const now = new Date();
     const notifiedKey = 'paymate_task_alerts';
-    let notifiedItems: string[] = [];
-    try {
-        notifiedItems = JSON.parse(localStorage.getItem(notifiedKey) || '[]');
-    } catch {
-        notifiedItems = [];
-    }
-
+    let notifiedItems: string[] = JSON.parse(localStorage.getItem(notifiedKey) || '[]');
     let updatedNotified = false;
 
     for (const task of currentTasks) {
       if (task.isCompleted) continue;
-
       const due = new Date(task.dueDate);
       let triggered = false;
       
-      // 1. Check Specific Reminder
       if (task.reminderDate) {
           const remindAt = new Date(task.reminderDate);
           const reminderId = `${task.id}_reminder`;
-          
           if (now >= remindAt && !notifiedItems.includes(reminderId) && now < due) {
-             const message = `Reminder: ${task.title} is coming up at ${due.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
-             
-             let emailSent = false;
-             if (isEmailEnabled) {
-                const success = await sendRealEmail(`Task Reminder: ${task.title}`, message, "-", task.dueDate.replace('T', ' '));
-                if (success) emailSent = true;
-             }
-
-             if (Notification.permission === "granted") {
-                new Notification("Task Reminder", {
-                    body: message,
-                    icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png"
-                });
-             }
-
-             setNotification({
-                id: Date.now().toString(),
-                message: `${message}${emailSent ? ' (Email sent)' : ''}`,
-                type: 'info'
-             });
-
+             const message = `Reminder: ${task.title}`;
+             if (isEmailEnabled) await sendRealEmail(`Task: ${task.title}`, message, "-", task.dueDate);
+             await showAppLevelNotification("Task Reminder", message);
+             setNotification({ id: Date.now().toString(), message, type: 'info' });
              notifiedItems.push(reminderId);
              updatedNotified = true;
              triggered = true;
           }
       }
-
-      // 2. Check Actual Due Date (Due Now / Overdue)
       if (!triggered) {
         const dueId = `${task.id}_due`;
         if (now >= due && !notifiedItems.includes(dueId)) {
-            const message = `Task Due Now: ${task.title}`;
-            
-            let emailSent = false;
-            if (isEmailEnabled) {
-                const success = await sendRealEmail(`Task Due: ${task.title}`, message, "-", task.dueDate.replace('T', ' '));
-                if (success) emailSent = true;
-            }
-
-            if (Notification.permission === "granted") {
-                new Notification("Task Due", {
-                    body: message,
-                    icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png"
-                });
-            }
-
-            setNotification({
-                id: Date.now().toString(),
-                message: `${message}${emailSent ? ` (Email sent)` : ''}`,
-                type: 'warning'
-            });
-
+            const message = `Task Due: ${task.title}`;
+            if (isEmailEnabled) await sendRealEmail(`Due: ${task.title}`, message, "-", task.dueDate);
+            await showAppLevelNotification("Task Due", message);
+            setNotification({ id: Date.now().toString(), message, type: 'warning' });
             notifiedItems.push(dueId);
             updatedNotified = true;
             triggered = true;
           }
       }
-
-      if (triggered) {
-          break;
-      }
+      if (triggered) break;
     }
-
-    if (updatedNotified) {
-      localStorage.setItem(notifiedKey, JSON.stringify(notifiedItems));
-    }
+    if (updatedNotified) localStorage.setItem(notifiedKey, JSON.stringify(notifiedItems));
   };
 
   const toggleEmailNotifications = () => {
       const newValue = !emailNotifications;
       setEmailNotifications(newValue);
       localStorage.setItem('billmate_email_pref', JSON.stringify(newValue));
-      setNotification({
-          id: Date.now().toString(),
-          message: `Email notifications ${newValue ? 'enabled' : 'disabled'}`,
-          type: 'info'
-      });
+      setNotification({ id: Date.now().toString(), message: `Email notifications ${newValue ? 'enabled' : 'disabled'}`, type: 'info' });
   };
   
-  const requestNotificationPermission = () => {
+  const requestNotificationPermission = async () => {
     if (!("Notification" in window)) {
-      setNotification({ id: Date.now().toString(), message: "This browser does not support notifications.", type: "warning" });
+      setNotification({ id: Date.now().toString(), message: "This browser does not support notifications", type: "warning" });
       return;
     }
-    
-    Notification.requestPermission().then(permission => {
+
+    if (Notification.permission === 'granted') {
+         setNotification({ id: Date.now().toString(), message: "Notifications are already enabled.", type: "info" });
+         showAppLevelNotification("Paymate", "Daily reminders are active.");
+         return;
+    }
+
+    if (Notification.permission === 'denied') {
+         setNotification({ 
+             id: Date.now().toString(), 
+             message: "Notifications are blocked by browser.", 
+             type: "warning" 
+         });
+         alert("Notifications are BLOCKED. Please click the Lock icon in your address bar or go to Settings > Site Settings and ALLOW Notifications for Paymate.");
+         return;
+    }
+
+    try {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
         if (permission === "granted") {
-            setNotification({ id: Date.now().toString(), message: "Push notifications enabled!", type: "success" });
-        } else {
-             setNotification({ id: Date.now().toString(), message: "Notifications blocked.", type: "warning" });
+            setNotification({ id: Date.now().toString(), message: "Push enabled! You will get daily reminders.", type: "success" });
+            showAppLevelNotification("Paymate", "Setup Complete. You will be reminded twice daily for due bills.");
         }
-    });
+    } catch (e) {
+        console.error(e);
+        setNotification({ id: Date.now().toString(), message: "Error requesting permission.", type: "warning" });
+    }
   };
 
   const handleTestAlert = async () => {
-    if (!emailConfig.serviceId) {
-        setNotification({ id: Date.now().toString(), message: 'Please configure EmailJS keys first!', type: 'warning' });
-        setShowEmailConfig(true);
-        return;
-    }
-
-    const msg = 'This is a test alert from Paymate.';
-    
-    if (Notification.permission === "granted") {
-       new Notification("Paymate Test", { body: msg, icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png" });
-    }
-
-    if (emailNotifications) {
-         setNotification({ id: Date.now().toString(), message: 'Sending test email...', type: 'info' });
+     if (Notification.permission === "granted") {
+         showAppLevelNotification("Paymate Test", "This is a test notification from the app.");
+     } else {
+         new Notification("Paymate Test", { body: "Browser notification test" });
+     }
+     
+     if (emailNotifications) {
          setIsSendingEmail(true);
-         const success = await sendRealEmail("Test Alert", "This is a test email from Paymate to verify your setup.", "0.00", new Date().toISOString().split('T')[0]);
+         const sent = await sendRealEmail("Test Alert", "This is a test email from Paymate.", "0.00", new Date().toISOString().split('T')[0]);
          setIsSendingEmail(false);
-         
-         if (success) {
-            setNotification({ id: Date.now().toString(), message: 'Email Sent Successfully!', type: 'success' });
-         } else {
-             setNotification({ id: Date.now().toString(), message: 'Test email failed. Check API keys.', type: 'warning' });
-         }
-    } else {
-         setNotification({ id: Date.now().toString(), message: 'Test audio alert played (Email disabled)', type: 'info' });
-    }
+         if (sent) setNotification({ id: Date.now().toString(), message: 'Email sent! Check Spam if not found.', type: 'success' });
+     }
   };
 
-  const resetDailyAlerts = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    localStorage.removeItem(`billmate_alerts_freq_${todayStr}`); // Clear new key
-    localStorage.removeItem(`paymate_task_alerts`);
-    setEmailHistory([]); // Clear history
-    localStorage.removeItem('paymate_email_history');
-    setNotification({
-        id: Date.now().toString(),
-        message: 'Alert & Email history cleared.',
-        type: 'success'
-    });
+  const addToGoogleCalendar = (title: string, dueDate: string, details: string = '') => {
+    // Set time to 09:00 AM local time on the due date
+    const d = new Date(dueDate);
+    d.setHours(9, 0, 0, 0);
+    
+    // Format to YYYYMMDDTHHMMSS
+    const start = d.toISOString().replace(/-|:|\.\d\d\d/g, "").slice(0, 15);
+    
+    // End time 5:00 PM (17:00)
+    d.setHours(17, 0, 0, 0);
+    const end = d.toISOString().replace(/-|:|\.\d\d\d/g, "").slice(0, 15);
+
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${start}/${end}&details=${encodeURIComponent(details)}&recur=RRULE:FREQ=DAILY`;
+    window.open(url, '_blank');
   };
 
-  const generateId = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return Date.now().toString(36) + Math.random().toString(36).substring(2);
-  };
-
-  // --- Bill Handlers ---
-  const handleSaveBill = (bill: Bill) => {
+  const handleSaveBill = (bill: Bill, autoCalendar: boolean) => {
     if (editingBill) {
       storageService.updateBill(bill);
-      setNotification({ id: Date.now().toString(), message: 'Bill updated successfully', type: 'success' });
+      setNotification({ id: Date.now().toString(), message: 'Bill updated successfully!', type: 'success' });
     } else {
       storageService.saveBill(bill);
-      setNotification({ id: Date.now().toString(), message: 'Bill added successfully', type: 'success' });
+      setNotification({ id: Date.now().toString(), message: 'Bill added successfully!', type: 'success' });
+      // Trigger Auto-Calendar
+      if (autoCalendar) {
+          addToGoogleCalendar(`Bill Due: ${bill.name}`, bill.dueDate, `Amount: ${bill.totalAmount}. Pay via Paymate.`);
+      }
     }
     loadBills();
     setShowAddForm(false);
     setEditingBill(null);
   };
-
-  const executeTogglePaid = () => {
-    if (!billToTogglePay) return;
-    const bill = billToTogglePay;
-    
-    const isPaying = !bill.isPaid;
-    const updated = { ...bill, isPaid: isPaying };
-    storageService.updateBill(updated);
-
-    if (isPaying && bill.isRecurring) {
-        const nextDate = new Date(bill.dueDate);
-        nextDate.setMonth(nextDate.getMonth() + 1);
-        const nextDueDateStr = nextDate.toISOString().split('T')[0];
-        const newBill: Bill = { ...bill, id: generateId(), dueDate: nextDueDateStr, isPaid: false };
-        storageService.saveBill(newBill);
-        setNotification({ id: Date.now().toString(), message: `Recurring bill created for next month`, type: 'success' });
-    } else {
-        setNotification({ id: Date.now().toString(), message: `Bill marked as ${isPaying ? 'Paid' : 'Unpaid'}`, type: 'success' });
-    }
-    loadBills();
-    setBillToTogglePay(null);
-  };
-
-  const confirmDeleteBill = () => {
-    if (billToDelete) {
-      storageService.deleteBill(billToDelete);
-      setBillToDelete(null);
-      loadBills();
-      setNotification({ id: Date.now().toString(), message: 'Bill deleted', type: 'info' });
-    }
-  };
-
-  // --- Task Handlers ---
+  
   const handleSaveTask = (task: Task) => {
     if (editingTask) {
-      storageService.updateTask(task);
-      setNotification({ id: Date.now().toString(), message: 'Task updated', type: 'success' });
+        storageService.updateTask(task);
+        setNotification({ id: Date.now().toString(), message: 'Task updated!', type: 'success' });
     } else {
-      storageService.saveTask(task);
-      setNotification({ id: Date.now().toString(), message: 'Task added', type: 'success' });
+        storageService.saveTask(task);
+        setNotification({ id: Date.now().toString(), message: 'Task added!', type: 'success' });
+        // Auto-calendar for tasks
+        addToGoogleCalendar(`Task Due: ${task.title}`, task.dueDate, "Paymate Task Reminder");
     }
     loadTasks();
     setShowTaskForm(false);
     setEditingTask(null);
-  };
+  }
 
-  const handleToggleTask = (task: Task) => {
-    const updated = { ...task, isCompleted: !task.isCompleted };
-    storageService.updateTask(updated);
-    loadTasks();
-  };
-
-  const confirmDeleteTask = () => {
-    if (taskToDelete) {
-      storageService.deleteTask(taskToDelete);
-      setTaskToDelete(null);
-      loadTasks();
-      setNotification({ id: Date.now().toString(), message: 'Task deleted', type: 'info' });
+  const handleDeleteBill = () => {
+    if (billToDelete) {
+      storageService.deleteBill(billToDelete);
+      setNotification({ id: Date.now().toString(), message: 'Bill deleted.', type: 'info' });
+      setBillToDelete(null);
+      loadBills();
     }
   };
+  
+  const handleDeleteTask = () => {
+      if (taskToDelete) {
+          storageService.deleteTask(taskToDelete);
+          setNotification({ id: Date.now().toString(), message: 'Task deleted.', type: 'info' });
+          setTaskToDelete(null);
+          loadTasks();
+      }
+  };
 
-  // --- UI Helpers ---
-  const getBillStatus = (bill: Bill) => {
-    if (bill.isPaid) return { color: 'green', text: 'PAID', border: 'border-green-500/50', badge: 'bg-green-500/20 text-green-300', bg: 'bg-green-500/5 opacity-70', icon: CheckCircle };
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const due = new Date(bill.dueDate);
-    due.setHours(0,0,0,0);
-    const diffTime = due.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return { color: 'red', text: `Overdue (${Math.abs(diffDays)}d)`, border: 'border-red-500', badge: 'bg-red-500/20 text-red-300', bg: 'bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]', icon: AlertCircle };
-    if (diffDays === 0) return { color: 'orange', text: 'Due Today', border: 'border-orange-500', badge: 'bg-orange-500/20 text-orange-300', bg: 'bg-orange-500/10 shadow-[0_0_15px_rgba(249,115,22,0.1)]', icon: AlertTriangle };
-    if (diffDays === 1) return { color: 'yellow', text: 'Due Tomorrow', border: 'border-yellow-500', badge: 'bg-yellow-500/20 text-yellow-300', bg: 'bg-yellow-500/5', icon: Clock };
-    if (diffDays <= 3) return { color: 'yellow', text: `Due in ${diffDays}d`, border: 'border-yellow-500', badge: 'bg-yellow-500/20 text-yellow-300', bg: 'bg-yellow-500/5', icon: Clock };
+  const executeTogglePaid = () => {
+    if (!billToTogglePay) return;
     
-    return { color: 'indigo', text: '', border: 'border-indigo-500/30', badge: '', bg: 'hover:bg-white/5', icon: null };
-  };
+    const updatedBill = { ...billToTogglePay, isPaid: !billToTogglePay.isPaid };
+    storageService.updateBill(updatedBill);
+    
+    // Logic for Recurring Bills
+    if (billToTogglePay.isRecurring && !billToTogglePay.isPaid) {
+        // Was unpaid, now marking paid -> Create next month's bill
+        const currentDueDate = new Date(billToTogglePay.dueDate);
+        const nextDueDate = new Date(currentDueDate);
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        
+        const newBill: Bill = {
+            ...billToTogglePay,
+            id: Date.now().toString(36) + Math.random().toString(36).substring(2),
+            dueDate: nextDueDate.toISOString().split('T')[0],
+            isPaid: false
+        };
+        storageService.saveBill(newBill);
+        setNotification({ 
+            id: Date.now().toString(), 
+            message: 'Bill paid! Next month\'s bill created automatically.', 
+            type: 'success' 
+        });
+    } else {
+        setNotification({ 
+            id: Date.now().toString(), 
+            message: `Bill marked as ${updatedBill.isPaid ? 'Paid' : 'Unpaid'}`, 
+            type: 'success' 
+        });
+    }
 
-  const getCategoryIcon = (category: BillCategory) => {
-    const iconProps = { size: 20 };
-    switch (category) {
-      case 'Credit Card': return <div className="p-2 rounded-xl bg-blue-500/20 text-blue-400"><CreditCard {...iconProps} /></div>;
-      case 'Electricity': return <div className="p-2 rounded-xl bg-yellow-500/20 text-yellow-400"><Zap {...iconProps} /></div>;
-      case 'Gas': return <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400"><Flame {...iconProps} /></div>;
-      case 'Water': return <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400"><Droplets {...iconProps} /></div>;
-      case 'Internet': return <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400"><Wifi {...iconProps} /></div>;
-      case 'Telephone': return <div className="p-2 rounded-xl bg-green-500/20 text-green-400"><Phone {...iconProps} /></div>;
-      case 'Insurance': return <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400"><Shield {...iconProps} /></div>;
-      case 'Rent': return <div className="p-2 rounded-xl bg-red-500/20 text-red-400"><HomeIcon {...iconProps} /></div>;
-      case 'Subscription': return <div className="p-2 rounded-xl bg-pink-500/20 text-pink-400"><RefreshCw {...iconProps} /></div>;
-      case 'Loan': return <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400"><Landmark {...iconProps} /></div>;
-      default: return <div className="p-2 rounded-xl bg-gray-500/20 text-gray-400"><Receipt {...iconProps} /></div>;
+    loadBills();
+    setBillToTogglePay(null);
+  };
+  
+  const handleToggleTask = (task: Task) => {
+      const updatedTask = { ...task, isCompleted: !task.isCompleted };
+      storageService.updateTask(updatedTask);
+      
+      // Recurring Task Logic
+      if (task.isRecurring && !task.isCompleted) {
+          const due = new Date(task.dueDate);
+          const nextDue = new Date(due.getTime() + 7 * 24 * 60 * 60 * 1000); // +7 days
+          
+          const newTask: Task = {
+              ...task,
+              id: Date.now().toString(36) + Math.random().toString(36).substring(2),
+              dueDate: nextDue.toISOString().slice(0, 16), // Keep format YYYY-MM-DDTHH:mm
+              isCompleted: false
+          };
+          storageService.saveTask(newTask);
+          setNotification({ id: Date.now().toString(), message: 'Task completed! Next week\'s task created.', type: 'success' });
+      } else {
+           setNotification({ id: Date.now().toString(), message: 'Task updated', type: 'info' });
+      }
+      loadTasks();
+  }
+
+  const handlePayViaUPI = () => {
+    if (billToPayNow) {
+        const updatedBill = { ...billToPayNow, isPaid: true };
+        storageService.updateBill(updatedBill);
+        setNotification({ id: Date.now().toString(), message: 'Payment recorded successfully!', type: 'success' });
+        loadBills();
+        setBillToPayNow(null);
     }
   };
 
-  // --- Modal Renders ---
-  const renderAboutModal = () => (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-      <div className="glass-panel w-full max-w-md rounded-2xl p-6 relative flex flex-col items-center text-center max-h-[80vh] overflow-y-auto">
-         <button onClick={() => setShowAbout(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24} /></button>
-         
-         <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center text-white font-bold text-3xl mb-4 shadow-xl shadow-indigo-500/20">P</div>
-         <h2 className="text-2xl font-bold text-white mb-1">Paymate</h2>
-         <p className="text-indigo-400 text-sm font-medium mb-6">Smart Bill Tracking Manager</p>
+  const generateReport = async () => {
+    setLoadingAdvice(true);
+    const result = await getFinancialAdvice(bills);
+    setAdvice(result);
+    setLoadingAdvice(false);
+  };
   
-         <div className="space-y-4 text-sm text-gray-300 text-left w-full bg-gray-800/50 p-4 rounded-xl border border-gray-700/50">
-           <p><strong className="text-white">Version:</strong> 1.2.0 (PWA Enabled)</p>
-           <p className="leading-relaxed">Paymate helps you organize your financial life by tracking bills, managing tasks, and providing intelligent insights to ensure you never miss a payment.</p>
-           
-           <h4 className="font-bold text-white mt-4 mb-2">Key Features:</h4>
-           <ul className="list-disc pl-5 space-y-1 text-gray-400">
-             <li>Smart Bill Scanning and upload</li>
-             <li>Audio & Email Alerts for Due Dates</li>
-             <li>Interactive Financial Reports</li>
-             <li>To-Do List with Reminders</li>
-             <li>Interactive Dashboard</li>
-           </ul>
-         </div>
-  
-         <div className="mt-6 pt-6 border-t border-gray-700 w-full">
-           <p className="text-xs text-gray-500">© 2024 Paymate Inc.</p>
-           <p className="text-xs text-gray-600 mt-1">Smart bill tracking and Task organizer</p>
-         </div>
-      </div>
-    </div>
-  );
-  
-  const renderHelpModal = () => (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-       <div className="glass-panel w-full max-w-lg rounded-2xl p-6 relative max-h-[85vh] overflow-y-auto">
-         <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={24} /></button>
-         <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><HelpCircle size={28} className="text-pink-400" /> Help & Support</h2>
-  
-         <div className="space-y-1 mb-8">
-           <h3 className="font-bold text-white mb-3 text-lg">Frequently Asked Questions</h3>
-           <FAQItem question="How do I scan a bill?" answer="Go to the Bills tab and click the '+' button. In the form, tap the 'Scan Bill' box to take a photo or upload a PDF. Our AI will automatically extract the details for you." />
-           <FAQItem question="Why use EmailJS?" answer="EmailJS is a reliable third-party service that connects to your Gmail/Outlook to send emails from your own account. It requires a free setup." />
-           <FAQItem question="How do I get my API Keys?" answer="1. Sign up at emailjs.com (Free). 2. Add an 'Email Service' (e.g., Gmail). 3. Create an 'Email Template'. 4. Go to Account > API Keys to get your Public Key." />
-           <FAQItem question="Is my data secure?" answer="Yes! Paymate stores all your financial data locally on your device using LocalStorage. We do not have a backend database." />
-           <FAQItem question="How do recurring bills work?" answer="When adding a bill, check 'Repeat Monthly'. Once you mark that bill as 'Paid', a new bill for the next month is automatically created with the same details." />
-         </div>
-  
-         <div className="bg-gray-800/50 p-5 rounded-xl border border-gray-700/50">
-           <h3 className="font-bold text-white mb-2">Need more help?</h3>
-           <p className="text-sm text-gray-400 mb-4">If you encounter any bugs or have feature requests, please reach out to our support team.</p>
-           <button className="w-full py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition flex items-center justify-center gap-2 shadow-lg">
-             <Mail size={18} /> Contact Support
-           </button>
-         </div>
-       </div>
-    </div>
-  );
+  const handleExportPDF = () => {
+    try {
+        const doc = new jsPDF();
+        
+        // Header
+        doc.setFontSize(20);
+        doc.setTextColor(99, 102, 241); // Indigo color
+        doc.text("Paymate Financial Report", 14, 22);
+        
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+        doc.text(`User: ${user.name}`, 14, 36);
 
-  // --- Render Sections ---
+        // Summary Stats
+        const total = bills.reduce((sum, b) => sum + b.totalAmount, 0);
+        const paid = bills.filter(b => b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
+        const pending = total - paid;
+        
+        doc.text(`Total Bill Amount: ${total.toFixed(2)}`, 14, 46);
+        doc.text(`Paid Amount: ${paid.toFixed(2)}`, 14, 52);
+        doc.text(`Pending Amount: ${pending.toFixed(2)}`, 14, 58);
+
+        const tableData = bills.map(b => [
+            b.name, 
+            b.category, 
+            b.dueDate, 
+            b.totalAmount.toFixed(2), 
+            b.isPaid ? "PAID" : "PENDING"
+        ]);
+
+        autoTable(doc, {
+            head: [['Bill Name', 'Category', 'Due Date', 'Amount', 'Status']],
+            body: tableData,
+            startY: 65,
+            theme: 'grid',
+            headStyles: { fillColor: [99, 102, 241] }
+        });
+
+        doc.save(`Paymate_Report_${new Date().toISOString().slice(0,10)}.pdf`);
+        setNotification({ id: Date.now().toString(), message: 'PDF Exported Successfully!', type: 'success' });
+    } catch (e) {
+        console.error(e);
+        setNotification({ id: Date.now().toString(), message: 'Failed to export PDF.', type: 'warning' });
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+        const wb = XLSX.utils.book_new();
+        const data = bills.map(b => ({
+            "Bill Name": b.name,
+            "Category": b.category,
+            "Total Amount": b.totalAmount,
+            "Due Date": b.dueDate,
+            "Status": b.isPaid ? "Paid" : "Pending",
+            "Recurring": b.isRecurring ? "Yes" : "No"
+        }));
+        
+        const ws = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, "My Bills");
+        XLSX.writeFile(wb, `Paymate_Bills_${new Date().toISOString().slice(0,10)}.xlsx`);
+        setNotification({ id: Date.now().toString(), message: 'Excel Exported Successfully!', type: 'success' });
+    } catch (e) {
+        console.error(e);
+        setNotification({ id: Date.now().toString(), message: 'Failed to export Excel.', type: 'warning' });
+    }
+  };
+  
+  // Smart Link Detector
+  const detectPaymentPlatform = (bill: Bill) => {
+      // 1. Check custom URL
+      if (bill.paymentUrl) return { url: bill.paymentUrl, name: 'Biller Website' };
+      
+      const lowerName = bill.name.toLowerCase();
+      
+      // 2. Check Name Database
+      for (const [key, val] of Object.entries(SMART_LINKS)) {
+          if (lowerName.includes(key)) {
+              return val;
+          }
+      }
+      
+      // 3. Fallback to Aggregators by Category
+      if (AGGREGATOR_LINKS[bill.category]) return { url: AGGREGATOR_LINKS[bill.category], name: 'Paytm' };
+      
+      return { url: AGGREGATOR_LINKS['default'], name: 'Paytm' };
+  };
+
+  // --- Render Helpers ---
+
   const renderHome = () => {
-    // Basic stats calculation reuse
-    const unpaidBills = bills.filter(b => !b.isPaid);
-    const totalDue = unpaidBills.reduce((sum, b) => sum + b.totalAmount, 0);
-    const overdueCount = unpaidBills.filter(b => new Date(b.dueDate) < new Date(new Date().setHours(0,0,0,0))).length;
-    const upcomingCount = unpaidBills.filter(b => new Date(b.dueDate) >= new Date(new Date().setHours(0,0,0,0))).length;
+    // 1. Calculate Stats
+    const totalDue = bills.filter(b => !b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
+    const totalMinDue = bills.filter(b => !b.isPaid).reduce((sum, b) => sum + (b.minDueAmount || 0), 0);
+    const overdueCount = bills.filter(b => !b.isPaid && new Date(b.dueDate) < new Date(new Date().setHours(0,0,0,0))).length;
+    const upcomingCount = bills.filter(b => !b.isPaid && new Date(b.dueDate) >= new Date(new Date().setHours(0,0,0,0))).length;
+    
+    // 2. Spending Chart Data (Last 6 months)
+    const paidBills = bills.filter(b => b.isPaid);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonth = new Date().getMonth();
+    const chartLabels = [];
+    const chartData = [];
+    
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(currentMonth - i);
+        const mIdx = d.getMonth();
+        const year = d.getFullYear();
+        chartLabels.push(months[mIdx]);
+        
+        const monthlyTotal = paidBills
+            .filter(b => {
+                const bDate = new Date(b.dueDate);
+                return bDate.getMonth() === mIdx && bDate.getFullYear() === year;
+            })
+            .reduce((sum, b) => sum + b.totalAmount, 0);
+        chartData.push(monthlyTotal);
+    }
+    
+    const maxVal = Math.max(...chartData, 100);
+    const points = chartData.map((val, i) => {
+        const x = (i / (chartData.length - 1)) * 100;
+        const y = 100 - (val / maxVal) * 80; // Scale to fit
+        return `${x},${y}`;
+    }).join(' ');
 
-    const today = new Date();
-    const currentMonthBills = bills.filter(b => new Date(b.dueDate).getMonth() === today.getMonth() && new Date(b.dueDate).getFullYear() === today.getFullYear());
-    const paidThisMonthCount = currentMonthBills.filter(b => b.isPaid).length;
-    const paidThisMonthAmount = currentMonthBills.filter(b => b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
+    // 3. Category Breakdown (Paid vs Due)
+    type CategoryStat = { name: string; paid: number; due: number; total: number; count: number };
+    const categoryStats: CategoryStat[] = Object.keys(CATEGORY_COLORS).map(cat => {
+        const catBills = bills.filter(b => b.category === cat);
+        const paid = catBills.filter(b => b.isPaid).length;
+        const due = catBills.filter(b => !b.isPaid).length;
+        const total = catBills.filter(b => !b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
+        return { name: cat, paid, due, total, count: catBills.length };
+    }).filter(c => c.count > 0);
 
-    const categoriesList: BillCategory[] = ['Credit Card', 'Electricity', 'Gas', 'Telephone', 'Water', 'Internet', 'Insurance', 'Rent', 'Subscription'];
-    const getCategoryStats = (cat: BillCategory) => {
-        const catBills = unpaidBills.filter(b => b.category === cat);
-        return { count: catBills.length, amount: catBills.reduce((s, b) => s + b.totalAmount, 0) };
-    };
+    // 4. Recent Activity
+    const recentActivity = [...bills]
+        .filter(b => b.isPaid)
+        .sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime())
+        .slice(0, 5);
 
     return (
-     <div className="space-y-6 animate-in fade-in duration-500 pb-24">
-      <div className="mb-2">
-        <h2 className="text-3xl font-bold text-white">Welcome back!</h2>
-        <p className="text-gray-400">Here's your summary for this month.</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-indigo-500 flex flex-col justify-between">
-          <div className="flex items-center gap-2 mb-2"><BarChart2 size={18} className="text-indigo-400" /><span className="text-gray-400 text-sm font-medium">Total Due</span></div>
-          <div className="text-2xl font-bold text-white">₹{totalDue.toLocaleString('en-IN')}</div>
-        </div>
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-red-500 flex flex-col justify-between">
-          <div className="flex items-center gap-2 mb-2"><AlertTriangle size={18} className="text-red-400" /><span className="text-gray-400 text-sm font-medium">Overdue</span></div>
-          <div className="text-2xl font-bold text-red-400">{overdueCount}</div>
-        </div>
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-blue-500 flex flex-col justify-between">
-           <div className="flex items-center gap-2 mb-2"><CalendarIcon size={18} className="text-blue-400" /><span className="text-gray-400 text-sm font-medium">Upcoming</span></div>
-          <div className="text-2xl font-bold text-blue-400">{upcomingCount}</div>
-        </div>
-      </div>
-
-      <div className="glass-panel p-6 rounded-2xl">
-         <div className="flex items-center gap-2 mb-4"><BarChart2 size={18} className="text-indigo-400" /><span className="font-semibold text-white">This Month</span></div>
-         <div className="grid grid-cols-2 gap-4">
-            <div className="bg-gray-800/50 p-4 rounded-xl text-center">
-              <div className="flex justify-center mb-2 text-green-400"><CheckCircle size={24} /></div>
-              <div className="text-xs text-gray-400 uppercase tracking-wider">Bills Paid</div>
-              <div className="text-2xl font-bold text-white mt-1">{paidThisMonthCount}</div>
+      <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+        <div className="flex items-center justify-between">
+            <div>
+               <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">Welcome, {user.name}</h1>
+               <p className="text-gray-400 text-sm">Here's your financial overview</p>
             </div>
-            <div className="bg-gray-800/50 p-4 rounded-xl text-center">
-              <div className="flex justify-center mb-2 text-blue-400"><Landmark size={24} /></div>
-               <div className="text-xs text-gray-400 uppercase tracking-wider">Amount Paid</div>
-              <div className="text-2xl font-bold text-blue-400 mt-1">₹{paidThisMonthAmount.toLocaleString('en-IN')}</div>
-            </div>
-         </div>
-      </div>
+            <button onClick={loadBills} className="p-2 bg-gray-800 rounded-full hover:bg-gray-700 transition">
+                <RefreshCw size={18} className="text-indigo-400" />
+            </button>
+        </div>
 
-      <div>
-        <div className="flex justify-between items-center mb-4 px-1">
-          <h3 className="text-xl font-bold text-white">Categories</h3>
-          <button onClick={() => setActiveTab('bills')} className="text-sm text-indigo-400 hover:text-indigo-300">View all</button>
+        {/* Top Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="glass-panel p-4 rounded-2xl border-l-4 border-indigo-500 relative overflow-hidden group">
+                <div className="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition"><DollarSign size={40} /></div>
+                <h3 className="text-xs text-gray-400 uppercase font-bold">Total Due</h3>
+                <p className="text-xl font-bold text-white mt-1">₹{totalDue.toLocaleString()}</p>
+            </div>
+             <div className="glass-panel p-4 rounded-2xl border-l-4 border-orange-500 relative overflow-hidden group">
+                <div className="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition"><Receipt size={40} /></div>
+                <h3 className="text-xs text-gray-400 uppercase font-bold">Min Due</h3>
+                <p className="text-xl font-bold text-orange-400 mt-1">₹{totalMinDue.toLocaleString()}</p>
+            </div>
+            <div className="glass-panel p-4 rounded-2xl border-l-4 border-red-500 relative overflow-hidden group">
+                <div className="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition"><AlertCircle size={40} /></div>
+                <h3 className="text-xs text-gray-400 uppercase font-bold">Overdue</h3>
+                <p className="text-xl font-bold text-red-400 mt-1">{overdueCount}</p>
+            </div>
+             <div className="glass-panel p-4 rounded-2xl border-l-4 border-blue-500 relative overflow-hidden group">
+                <div className="absolute right-2 top-2 opacity-10 group-hover:opacity-20 transition"><CalendarIcon size={40} /></div>
+                <h3 className="text-xs text-gray-400 uppercase font-bold">Upcoming</h3>
+                <p className="text-xl font-bold text-blue-400 mt-1">{upcomingCount}</p>
+            </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {categoriesList.map(cat => {
-            const stats = getCategoryStats(cat);
-            return (
-              <div key={cat} className="glass-panel p-4 rounded-2xl hover:bg-white/5 transition cursor-pointer" onClick={() => setActiveTab('bills')}>
-                <div className="flex items-start justify-between mb-3">{getCategoryIcon(cat)}</div>
-                <h4 className="text-sm font-medium text-white mb-1">{cat}</h4>
-                <p className="text-xs text-gray-400">{stats.count === 0 ? '0 bills' : `${stats.count} bill${stats.count > 1 ? 's' : ''} • ₹${stats.amount.toLocaleString('en-IN')}`}</p>
-              </div>
-            );
-          })}
+
+        {/* Chart Section */}
+        <div className="glass-panel p-6 rounded-2xl">
+            <h3 className="font-bold text-gray-200 mb-4 flex items-center gap-2"><TrendingUp size={18} className="text-indigo-400"/> Monthly Spending Trend</h3>
+            <div className="h-40 relative flex items-end justify-between px-2">
+                 <svg className="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none">
+                    <defs>
+                        <linearGradient id="chartGradient" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor="rgba(99, 102, 241, 0.5)" />
+                            <stop offset="100%" stopColor="rgba(99, 102, 241, 0)" />
+                        </linearGradient>
+                    </defs>
+                    <path d={`M0,100 ${points.split(' ').map(p => `L${p}`).join(' ')} L100,100 Z`} fill="url(#chartGradient)" />
+                    <polyline points={points} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                 </svg>
+                 {chartLabels.map((l, i) => (
+                     <div key={i} className="text-[10px] text-gray-500 z-10">{l}</div>
+                 ))}
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Category Grid */}
+            <div>
+                 <h3 className="font-bold text-gray-200 mb-4 flex items-center justify-between">
+                    <span>Category Breakdown</span>
+                    <span className="text-xs text-gray-500 font-normal">Paid vs Due</span>
+                 </h3>
+                 <div className="grid grid-cols-2 gap-3">
+                     {categoryStats.map(cat => (
+                         <div key={cat.name} className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 hover:border-indigo-500/50 transition cursor-pointer" onClick={() => { setSearchQuery(cat.name); setActiveTab('bills'); }}>
+                             <div className="flex justify-between items-start mb-2">
+                                 <span className="text-xs font-bold text-gray-300 truncate w-20">{cat.name}</span>
+                                 <div className="w-2 h-2 rounded-full" style={{backgroundColor: CATEGORY_COLORS[cat.name] || '#ccc'}}></div>
+                             </div>
+                             <div className="flex items-end justify-between">
+                                 <div>
+                                     <div className="text-[10px] text-gray-500">Due</div>
+                                     <div className="font-bold text-white">₹{cat.total.toLocaleString()}</div>
+                                 </div>
+                                 <div className="flex gap-1 text-[10px]">
+                                     <span className="text-green-400 bg-green-400/10 px-1.5 rounded">{cat.paid}</span>
+                                     <span className="text-red-400 bg-red-400/10 px-1.5 rounded">{cat.due}</span>
+                                 </div>
+                             </div>
+                         </div>
+                     ))}
+                 </div>
+            </div>
+
+            {/* Recent Activity Sidebar */}
+            <div>
+                <h3 className="font-bold text-gray-200 mb-4 flex items-center gap-2"><Activity size={18} className="text-indigo-400"/> Recent Activity</h3>
+                <div className="space-y-3">
+                    {recentActivity.length > 0 ? recentActivity.map(bill => (
+                        <div key={bill.id} className="bg-gray-800/30 p-3 rounded-xl flex items-center justify-between border border-gray-700/50">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-green-500/10 p-2 rounded-full"><CheckCircle size={16} className="text-green-400" /></div>
+                                <div>
+                                    <div className="text-sm font-bold text-white">{bill.name}</div>
+                                    <div className="text-xs text-gray-500">{new Date(bill.dueDate).toLocaleDateString()}</div>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-sm font-bold text-white">₹{bill.totalAmount}</div>
+                                <div className="text-[10px] text-green-400">Paid</div>
+                            </div>
+                        </div>
+                    )) : (
+                        <div className="text-center py-8 text-gray-500 text-sm">No recent payments</div>
+                    )}
+                </div>
+                
+                {/* Quick Actions */}
+                <div className="mt-6 bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4">
+                    <h4 className="text-indigo-300 text-sm font-bold mb-3">Quick Actions</h4>
+                    <div className="flex gap-2">
+                        <button onClick={() => setShowAddForm(true)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 py-2 rounded-lg text-xs font-bold transition">Add Bill</button>
+                        <button onClick={() => setShowTaskForm(true)} className="flex-1 bg-pink-600 hover:bg-pink-700 py-2 rounded-lg text-xs font-bold transition">Add Task</button>
+                    </div>
+                </div>
+            </div>
         </div>
       </div>
-    </div>
     );
   };
 
   const renderBillList = () => {
     const filteredBills = bills.filter(bill => {
-      const matchesSearch = bill.name.toLowerCase().includes(searchQuery.toLowerCase()) || bill.category.toLowerCase().includes(searchQuery.toLowerCase());
-      let matchesFilter = true;
-      if (filterStatus === 'paid') matchesFilter = bill.isPaid;
-      else if (filterStatus === 'pending') matchesFilter = !bill.isPaid;
-      else if (filterStatus === 'overdue') {
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        matchesFilter = !bill.isPaid && new Date(bill.dueDate) < today;
-      }
-      return matchesSearch && matchesFilter;
+      const matchesSearch = bill.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            bill.category.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const isOverdue = !bill.isPaid && new Date(bill.dueDate) < new Date(new Date().setHours(0,0,0,0));
+      
+      if (filterStatus === 'paid') return matchesSearch && bill.isPaid;
+      if (filterStatus === 'pending') return matchesSearch && !bill.isPaid;
+      if (filterStatus === 'overdue') return matchesSearch && isOverdue;
+      return matchesSearch;
     });
 
-    const FilterChip = ({ label, status, active }: { label: string, status: FilterStatus, active: boolean }) => (
-      <button onClick={() => setFilterStatus(status)} className={`px-4 py-2 rounded-full text-sm font-medium transition whitespace-nowrap ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>{label}</button>
-    );
-
     return (
-      <div className="space-y-4 animate-in fade-in duration-500 pb-24">
-         <div className="flex justify-between items-center mb-2"><h2 className="text-2xl font-bold">Your Bills</h2><div className="text-sm text-gray-400">{filteredBills.length} found</div></div>
-         <div className="relative mb-2">
-            <Search className="absolute left-3 top-3.5 text-gray-400" size={18} />
-            <input type="text" placeholder="Search by name or category..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-gray-800/50 border border-gray-700 rounded-xl py-3 pl-10 pr-10 text-white focus:ring-2 focus:ring-indigo-500 outline-none transition" />
-            {searchQuery && (<button onClick={() => setSearchQuery('')} className="absolute right-3 top-3.5 text-gray-400 hover:text-white"><X size={18} /></button>)}
-         </div>
-         <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-            <FilterChip label="All Bills" status="all" active={filterStatus === 'all'} />
-            <FilterChip label="Pending" status="pending" active={filterStatus === 'pending'} />
-            <FilterChip label="Overdue" status="overdue" active={filterStatus === 'overdue'} />
-            <FilterChip label="Paid" status="paid" active={filterStatus === 'paid'} />
-         </div>
-
-         {filteredBills.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 px-6 text-center glass-panel rounded-2xl border border-gray-700/50">
-                <div className="bg-gray-800/80 p-6 rounded-full mb-4 shadow-lg ring-1 ring-white/10"><Receipt size={48} className="text-indigo-400 opacity-80" /></div>
-                {bills.length === 0 ? (
-                  <>
-                    <h3 className="text-xl font-bold text-white mb-2">No bills found</h3>
-                    <p className="text-gray-400 max-w-xs mx-auto mb-6 text-sm leading-relaxed">You haven't added any bills yet.</p>
-                    <button onClick={() => { setEditingBill(null); setShowAddForm(true); }} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-medium transition shadow-lg shadow-indigo-500/25 transform hover:-translate-y-0.5"><Plus size={18} strokeWidth={2.5} /><span>Add First Bill</span></button>
-                  </>
-                ) : (
-                  <><h3 className="text-xl font-bold text-white mb-2">No matching bills</h3><button onClick={() => { setSearchQuery(''); setFilterStatus('all'); }} className="mt-4 text-indigo-400 hover:text-indigo-300 font-medium">Clear Filters</button></>
-                )}
-              </div>
-            ) : (
-              filteredBills.map(bill => {
-                const status = getBillStatus(bill);
-                const StatusIcon = status.icon;
-                return (
-                  <div key={bill.id} className={`glass-panel p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 transition-all duration-300 border-l-4 ${status.border} ${status.bg} hover:scale-[1.01]`}>
-                    <div className="flex-1 w-full sm:w-auto flex items-start gap-4">
-                      <div className="mt-1 flex-shrink-0 transform transition-transform group-hover:scale-110">{getCategoryIcon(bill.category)}</div>
-                      <div>
-                        <div className="flex items-center gap-3 mb-1 flex-wrap">
-                          <h3 className={`font-bold text-lg ${bill.isPaid ? 'line-through text-gray-400' : 'text-white'}`}>{bill.name}</h3>
-                          {status.text && (<span className={`${status.badge} text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap flex items-center gap-1.5`}>{StatusIcon && <StatusIcon size={12} strokeWidth={2.5} />}{status.text}</span>)}
-                          {bill.isRecurring && !bill.isPaid && (<span className="flex items-center gap-1 bg-indigo-500/20 text-indigo-300 text-xs px-2 py-0.5 rounded-full" title="Recurring Monthly"><Repeat size={10} /></span>)}
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-300">
-                          <span className="bg-white/5 px-2 py-0.5 rounded text-xs text-gray-400">{bill.category}</span>
-                          <span className="font-medium">₹{bill.totalAmount.toLocaleString('en-IN')}</span>
-                        </div>
-                        <div className={`text-xs mt-2 font-medium flex items-center gap-1 ${status.color === 'red' ? 'text-red-400' : status.color === 'orange' ? 'text-orange-400' : status.color === 'yellow' ? 'text-yellow-400' : 'text-indigo-300'}`}><CalendarIcon size={12} /><span>Due: {new Date(bill.dueDate).toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                      <button onClick={() => setBillToTogglePay(bill)} title={bill.isPaid ? "Mark as Unpaid" : "Mark as Paid"} className={`p-2 rounded-lg transition-all duration-200 transform hover:scale-110 ${bill.isPaid ? 'bg-yellow-600/20 text-yellow-500 hover:bg-yellow-600/40' : 'bg-green-600/20 text-green-500 hover:bg-green-600/40 shadow-lg shadow-green-900/20'}`}>{bill.isPaid ? <RefreshCw size={20} /> : <CheckCircle size={20} />}</button>
-                      <button onClick={() => { setEditingBill(bill); setShowAddForm(true); }} className="p-2 rounded-lg bg-blue-600/20 text-blue-500 hover:bg-blue-600/40 transition-all duration-200 transform hover:scale-110"><Pencil size={20} /></button>
-                      <button onClick={() => setBillToDelete(bill.id)} className="p-2 rounded-lg bg-red-600/20 text-red-500 hover:bg-red-600/40 transition-all duration-200 transform hover:scale-110"><Trash2 size={20} /></button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-      </div>
-    );
-  };
-
-  const renderTasks = () => {
-    return (
-      <div className="space-y-4 animate-in fade-in duration-500 pb-24">
-        <div className="flex justify-between items-center mb-4">
-           <div>
-            <h2 className="text-2xl font-bold">To-Do List</h2>
-            <p className="text-gray-400 text-sm">Manage your day to day activities</p>
-           </div>
-           <button onClick={() => { setEditingTask(null); setShowTaskForm(true); }} className="bg-pink-600 hover:bg-pink-500 text-white p-2.5 rounded-xl shadow-lg shadow-pink-600/30 transition-transform active:scale-95"><Plus size={20} /></button>
+      <div className="space-y-4 pb-24 animate-in fade-in duration-500">
+        <div className="flex gap-2 mb-2 sticky top-0 bg-gray-950/80 backdrop-blur-md z-10 py-2">
+            <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+                <input 
+                    type="text" 
+                    placeholder="Search bills..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+            </div>
+            <button onClick={() => setShowAddForm(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl shadow-lg transition">
+                <Plus size={24} />
+            </button>
         </div>
 
-        {tasks.length === 0 ? (
-           <div className="flex flex-col items-center justify-center py-16 px-6 text-center glass-panel rounded-2xl border border-gray-700/50">
-             <div className="bg-gray-800/80 p-6 rounded-full mb-4 shadow-lg ring-1 ring-white/10"><ListTodo size={48} className="text-pink-400 opacity-80" /></div>
-             <h3 className="text-xl font-bold text-white mb-2">No tasks yet</h3>
-             <p className="text-gray-400 max-w-xs mx-auto mb-6 text-sm">Add tasks to keep track of your daily activities.</p>
-           </div>
-        ) : (
-          tasks.map(task => {
-            const isDueSoon = !task.isCompleted && new Date(task.dueDate) <= new Date(Date.now() + 3600000); // 1 hour
-            const isOverdue = !task.isCompleted && new Date(task.dueDate) < new Date();
-            const hasReminder = !!task.reminderDate && !task.isCompleted;
+        {/* Filter Chips */}
+        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {['all', 'pending', 'overdue', 'paid'].map(status => (
+                <button 
+                    key={status}
+                    onClick={() => setFilterStatus(status as FilterStatus)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition capitalize ${filterStatus === status ? 'bg-indigo-500 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                >
+                    {status}
+                </button>
+            ))}
+        </div>
 
+        {filteredBills.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center opacity-60">
+            <div className="bg-gray-800 p-4 rounded-full mb-4">
+                <Receipt size={40} className="text-gray-500" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-300">No bills found</h3>
+            <p className="text-gray-500 text-sm max-w-xs mt-2">Try adjusting your filters or add your first bill to get started.</p>
+            <button onClick={() => setShowAddForm(true)} className="mt-6 text-indigo-400 font-bold text-sm hover:underline">Add New Bill</button>
+          </div>
+        ) : (
+          filteredBills.map(bill => {
+            const isOverdue = !bill.isPaid && new Date(bill.dueDate) < new Date(new Date().setHours(0,0,0,0));
             return (
-              <div key={task.id} className={`glass-panel p-4 rounded-xl flex items-center justify-between gap-4 border-l-4 ${task.isCompleted ? 'border-green-500/30 opacity-60' : isOverdue ? 'border-red-500 bg-red-500/5' : 'border-pink-500'} transition-all hover:bg-white/5`}>
-                 <div className="flex items-center gap-4 flex-1">
-                    <button onClick={() => handleToggleTask(task)} className={`p-2 rounded-lg transition-colors ${task.isCompleted ? 'text-green-400 bg-green-500/10' : 'text-gray-500 hover:text-pink-400'}`}>
-                       {task.isCompleted ? <CheckSquare size={24} /> : <Square size={24} />}
-                    </button>
+                <div key={bill.id} className={`glass-panel p-5 rounded-2xl border transition-all hover:border-gray-500 ${isOverdue ? 'border-red-500/50 bg-red-900/10' : bill.isPaid ? 'border-green-500/50' : 'border-gray-700'}`}>
+                <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold text-white shadow-inner" style={{backgroundColor: CATEGORY_COLORS[bill.category]}}>
+                        {bill.category.charAt(0)}
+                    </div>
                     <div>
-                        <h3 className={`font-medium text-lg ${task.isCompleted ? 'line-through text-gray-500' : 'text-white'}`}>{task.title}</h3>
-                        <div className="flex flex-col gap-1 mt-1">
-                            <div className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-red-400 font-bold' : 'text-gray-400'}`}>
-                                <Clock size={12} />
-                                {new Date(task.dueDate).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
-                                {isOverdue && !task.isCompleted && " (Overdue)"}
-                            </div>
-                            {hasReminder && (
-                                <div className="text-[10px] flex items-center gap-1 text-indigo-300">
-                                    <Bell size={10} />
-                                    Alert: {new Date(task.reminderDate!).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                            )}
+                        <h3 className="font-bold text-white text-lg leading-tight">{bill.name}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs bg-gray-700 px-2 py-0.5 rounded text-gray-300">{bill.category}</span>
+                            {bill.isRecurring && <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded flex items-center gap-1"><Repeat size={10} /> Monthly</span>}
                         </div>
                     </div>
-                 </div>
-                 <div className="flex gap-2">
-                    <button onClick={() => { setEditingTask(task); setShowTaskForm(true); }} className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg"><Pencil size={18} /></button>
-                    <button onClick={() => setTaskToDelete(task.id)} className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg"><Trash2 size={18} /></button>
-                 </div>
-              </div>
+                    </div>
+                    <div className="text-right">
+                    <div className="text-xl font-bold text-white tracking-tight">₹{bill.totalAmount.toLocaleString()}</div>
+                    {bill.minDueAmount > 0 && !bill.isPaid && (
+                        <div className="text-xs text-orange-400 font-medium mt-1">Min: ₹{bill.minDueAmount.toLocaleString()}</div>
+                    )}
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-700/50">
+                    <div className={`flex items-center gap-2 text-sm font-medium ${isOverdue ? 'text-red-400' : 'text-gray-400'}`}>
+                        <CalendarIcon size={16} />
+                        <span>{isOverdue ? 'Overdue' : 'Due'}: {new Date(bill.dueDate).toLocaleDateString()}</span>
+                    </div>
+
+                    <div className="flex gap-1 items-center">
+                        {!bill.isPaid && (
+                           <button 
+                                onClick={() => setBillToPayNow(bill)}
+                                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition shadow-lg shadow-indigo-500/20 mr-1"
+                                title="Pay Now via UPI"
+                           >
+                               <Smartphone size={16} /> Pay Now
+                           </button>
+                        )}
+                        
+                        <button 
+                             onClick={() => addToGoogleCalendar(`Bill Due: ${bill.name}`, bill.dueDate, `Amount: ₹${bill.totalAmount}`)}
+                             className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+                             title="Set Device Reminder"
+                        >
+                            <CalendarIcon size={18} />
+                        </button>
+
+                        <button 
+                            onClick={() => { setEditingBill(bill); setShowAddForm(true); }}
+                            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition"
+                            title="Edit"
+                        >
+                            <Pencil size={18} />
+                        </button>
+                        
+                        <button 
+                            onClick={() => setBillToTogglePay(bill)}
+                            className={`p-2 rounded-lg transition ${bill.isPaid ? 'text-green-400 hover:bg-green-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                            title={bill.isPaid ? "Mark Unpaid" : "Mark Paid"}
+                        >
+                            <CheckCircle size={18} className={bill.isPaid ? "fill-green-400/20" : ""} />
+                        </button>
+
+                         <button 
+                            onClick={() => setBillToDelete(bill.id)}
+                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                            title="Delete"
+                        >
+                            <Trash2 size={18} />
+                        </button>
+                    </div>
+                </div>
+                </div>
             );
           })
         )}
       </div>
     );
   };
+  
+  const renderTasks = () => {
+    const sortedTasks = [...tasks].sort((a,b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    
+    return (
+      <div className="space-y-4 pb-24 animate-in fade-in duration-500">
+        <div className="flex justify-between items-center mb-4 sticky top-0 bg-gray-950/80 backdrop-blur-md z-10 py-2">
+            <h2 className="text-xl font-bold flex items-center gap-2"><ListTodo className="text-pink-500"/> My Tasks</h2>
+            <button onClick={() => setShowTaskForm(true)} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition flex items-center gap-2">
+                <Plus size={18} /> Add Task
+            </button>
+        </div>
+        
+        {sortedTasks.length === 0 ? (
+           <div className="flex flex-col items-center justify-center py-16 text-center opacity-60">
+            <div className="bg-gray-800 p-4 rounded-full mb-4">
+                <CheckSquare size={40} className="text-gray-500" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-300">All caught up!</h3>
+            <p className="text-gray-500 text-sm max-w-xs mt-2">No pending tasks. Add a new one to stay organized.</p>
+           </div>
+        ) : (
+           sortedTasks.map(task => {
+               const isOverdue = !task.isCompleted && new Date(task.dueDate) < new Date();
+               return (
+                   <div key={task.id} className={`glass-panel p-4 rounded-xl border flex items-center gap-3 transition-all ${task.isCompleted ? 'opacity-50 border-gray-800' : 'border-gray-700 hover:border-pink-500/50'}`}>
+                       <button onClick={() => handleToggleTask(task)} className={`shrink-0 transition-colors ${task.isCompleted ? 'text-green-400' : 'text-gray-500 hover:text-pink-500'}`}>
+                           {task.isCompleted ? <CheckSquare size={24} /> : <Square size={24} />}
+                       </button>
+                       <div className="flex-1 min-w-0">
+                           <h4 className={`font-bold truncate ${task.isCompleted ? 'line-through text-gray-500' : 'text-white'}`}>{task.title}</h4>
+                           <div className="flex items-center gap-3 mt-1">
+                               <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-red-400' : 'text-gray-400'}`}>
+                                   <Clock size={12} /> {new Date(task.dueDate).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                               </span>
+                               {task.isRecurring && <span className="text-[10px] bg-pink-500/20 text-pink-300 px-1.5 py-0.5 rounded flex items-center gap-1"><Repeat size={10} /> Weekly</span>}
+                               {task.reminderDate && <span className="text-[10px] text-indigo-300 flex items-center gap-1"><Bell size={10} /> Set</span>}
+                           </div>
+                       </div>
+                       
+                       <div className="flex gap-1 shrink-0">
+                            <button 
+                                onClick={() => addToGoogleCalendar(`Task: ${task.title}`, task.dueDate, "Paymate Task")}
+                                className="p-2 text-gray-500 hover:text-white hover:bg-gray-700 rounded-lg"
+                            >
+                                <CalendarIcon size={16} />
+                            </button>
+                           <button onClick={() => { setEditingTask(task); setShowTaskForm(true); }} className="p-2 text-gray-500 hover:text-white hover:bg-gray-700 rounded-lg">
+                               <Pencil size={16} />
+                           </button>
+                           <button onClick={() => setTaskToDelete(task.id)} className="p-2 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-lg">
+                               <Trash2 size={16} />
+                           </button>
+                       </div>
+                   </div>
+               );
+           })
+        )}
+      </div>
+    );
+  }
 
   const renderReports = () => {
-    // ... reused logic for reports
-    if (bills.length === 0) {
-        return (
-             <div className="flex flex-col items-center justify-center h-[60vh] text-center px-6 animate-in fade-in zoom-in duration-300">
-                <div className="bg-gray-800/50 p-8 rounded-full mb-6 ring-1 ring-white/5"><BarChart2 size={64} className="text-gray-600" /></div>
-                <h3 className="text-xl font-bold text-white mb-2">No Reports Yet</h3>
-                <p className="text-gray-400 max-w-sm text-sm">Add bills to see your financial insights and spending trends here.</p>
-            </div>
-        );
-    }
-    const totalPaid = bills.filter(b => b.isPaid).reduce((acc, b) => acc + b.totalAmount, 0);
-    const totalPending = bills.filter(b => !b.isPaid).reduce((acc, b) => acc + b.totalAmount, 0);
-    const grandTotal = totalPaid + totalPending;
-    const categoryStats: { category: string; amount: number; percentage: number }[] = [];
-    const catMap = new Map<string, number>();
-    bills.forEach(b => catMap.set(b.category, (catMap.get(b.category) || 0) + b.totalAmount));
-    catMap.forEach((amount, category) => categoryStats.push({ category, amount, percentage: grandTotal > 0 ? (amount / grandTotal) * 100 : 0 }));
-    categoryStats.sort((a, b) => b.amount - a.amount);
-    const topCategories = categoryStats.slice(0, 5);
-    const monthlyTrends = [];
-    const today = new Date();
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-        const monthBills = bills.filter(b => { const [yStr, mStr] = b.dueDate.split('-'); return parseInt(mStr) - 1 === d.getMonth() && parseInt(yStr) === d.getFullYear(); });
-        monthlyTrends.push({ label: d.toLocaleString('default', { month: 'short' }), amount: monthBills.reduce((sum, b) => sum + b.totalAmount, 0) });
-    }
-    const maxTrend = Math.max(...monthlyTrends.map(t => t.amount), 100);
+     const total = bills.reduce((sum, b) => sum + b.totalAmount, 0);
+     const paid = bills.filter(b => b.isPaid).reduce((sum, b) => sum + b.totalAmount, 0);
+     const pending = total - paid;
+     const percentage = total > 0 ? Math.round((paid / total) * 100) : 0;
+     
+     return (
+         <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+             <div className="flex justify-between items-center mb-2">
+                 <h2 className="text-xl font-bold flex items-center gap-2"><PieChart className="text-indigo-500"/> Financial Reports</h2>
+                 <div className="flex gap-2">
+                     <button onClick={handleExportPDF} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-700 transition" title="Export PDF"><FileDown size={20}/></button>
+                     <button onClick={handleExportExcel} className="bg-gray-800 p-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-700 transition" title="Export Excel"><FileSpreadsheet size={20}/></button>
+                 </div>
+             </div>
+
+             <div className="glass-panel p-6 rounded-2xl text-center">
+                 <div className="relative w-40 h-40 mx-auto mb-4 flex items-center justify-center">
+                     <svg className="w-full h-full transform -rotate-90">
+                         <circle cx="80" cy="80" r="70" stroke="#1f2937" strokeWidth="12" fill="none" />
+                         <circle cx="80" cy="80" r="70" stroke="#6366f1" strokeWidth="12" fill="none" strokeDasharray="440" strokeDashoffset={440 - (440 * percentage) / 100} className="transition-all duration-1000 ease-out" />
+                     </svg>
+                     <div className="absolute flex flex-col items-center">
+                         <span className="text-4xl font-bold text-white">{percentage}%</span>
+                         <span className="text-xs text-gray-400">Paid</span>
+                     </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-4 text-left">
+                     <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
+                         <div className="text-gray-400 text-xs mb-1">Total Paid</div>
+                         <div className="text-xl font-bold text-green-400">₹{paid.toLocaleString()}</div>
+                     </div>
+                     <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
+                         <div className="text-gray-400 text-xs mb-1">Pending</div>
+                         <div className="text-xl font-bold text-red-400">₹{pending.toLocaleString()}</div>
+                     </div>
+                 </div>
+             </div>
+
+             {/* Smart Advice */}
+             <div className="glass-panel p-6 rounded-2xl border border-indigo-500/30 bg-indigo-900/10">
+                 <h3 className="font-bold text-indigo-300 mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-2"><Sparkles size={18}/> AI Financial Advice</span>
+                    {advice && <button onClick={() => setAdvice('')} className="p-1 hover:bg-white/10 rounded-full"><X size={16}/></button>}
+                 </h3>
+                 
+                 {advice ? (
+                     <div className="prose prose-invert prose-sm max-w-none">
+                         <p className="whitespace-pre-line text-gray-300 leading-relaxed">{advice}</p>
+                     </div>
+                 ) : (
+                     <div className="text-center py-6">
+                         <p className="text-gray-400 text-sm mb-4">Get personalized insights on how to prioritize your bill payments.</p>
+                         <button 
+                            onClick={generateReport}
+                            disabled={loadingAdvice}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-full font-bold transition flex items-center gap-2 mx-auto disabled:opacity-50"
+                         >
+                            {loadingAdvice ? <Loader2 className="animate-spin" /> : <Sparkles size={16} />}
+                            {loadingAdvice ? 'Analyzing...' : 'Generate Smart Plan'}
+                         </button>
+                     </div>
+                 )}
+             </div>
+         </div>
+     );
+  }
+  
+  const renderSettings = () => {
+    return (
+        <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+             <h2 className="text-xl font-bold flex items-center gap-2 mb-4"><Settings className="text-gray-400"/> Settings</h2>
+
+             {/* Account Section */}
+             <div className="glass-panel p-5 rounded-2xl">
+                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">Account</h3>
+                 <div className="flex items-center gap-4 mb-6">
+                     <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center text-xl font-bold text-white shadow-lg">
+                         {user.name.charAt(0)}
+                     </div>
+                     <div>
+                         <h4 className="font-bold text-white text-lg">{user.name}</h4>
+                         <p className="text-gray-400 text-sm">{user.email}</p>
+                     </div>
+                 </div>
+                 <button onClick={onLogout} className="w-full bg-gray-800 hover:bg-red-900/30 text-gray-300 hover:text-red-400 py-3 rounded-xl flex items-center justify-center gap-2 font-medium transition">
+                     <LogOut size={18} /> Logout
+                 </button>
+             </div>
+
+             {/* Notifications Section */}
+             <div className="glass-panel p-5 rounded-2xl">
+                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">Notifications</h3>
+                 
+                 <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-700/50">
+                     <div className="flex items-center gap-3">
+                         <div className={`p-2 rounded-lg ${emailNotifications ? 'bg-indigo-500/20 text-indigo-400' : 'bg-gray-800 text-gray-500'}`}><Mail size={20}/></div>
+                         <div>
+                            <p className="text-white font-medium">Email Alerts</p>
+                            <p className="text-xs text-gray-500">{emailNotifications ? 'Enabled' : 'Disabled'}</p>
+                         </div>
+                     </div>
+                     <button 
+                        onClick={toggleEmailNotifications}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${emailNotifications ? 'bg-indigo-500' : 'bg-gray-700'}`}
+                     >
+                        <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${emailNotifications ? 'left-7' : 'left-1'}`}></div>
+                     </button>
+                 </div>
+                 
+                 <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-700/50">
+                      <div className="flex items-center gap-3">
+                         <div className={`p-2 rounded-lg ${notificationPermission === 'granted' ? 'bg-green-500/20 text-green-400' : 'bg-gray-800 text-gray-500'}`}><Bell size={20}/></div>
+                         <div>
+                            <p className="text-white font-medium">Push Notifications</p>
+                            <p className="text-xs text-gray-500">Status: {notificationPermission}</p>
+                         </div>
+                     </div>
+                     {notificationPermission !== 'granted' && (
+                         <button onClick={requestNotificationPermission} className="text-indigo-400 text-xs font-bold hover:underline">Enable</button>
+                     )}
+                 </div>
+
+                 <button onClick={handleTestAlert} disabled={isSendingEmail} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50">
+                     {isSendingEmail ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                     Test Alert / Email
+                 </button>
+                 
+                 {/* Schedule All Reminders */}
+                 <button 
+                    onClick={() => bills.filter(b => !b.isPaid).forEach(b => addToGoogleCalendar(`Bill Due: ${b.name}`, b.dueDate, `Amount: ₹${b.totalAmount}`))}
+                    className="w-full mt-3 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2"
+                 >
+                     <CalendarIcon size={16} /> Schedule All Reminders
+                 </button>
+             </div>
+
+             {/* Email Configuration Section */}
+             <div className="glass-panel p-5 rounded-2xl">
+                  <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex justify-between items-center">
+                      Email Configuration
+                      <button onClick={() => setShowEmailConfig(!showEmailConfig)} className="text-indigo-400 text-xs font-bold hover:underline">
+                          {showEmailConfig ? 'Hide' : 'Edit'}
+                      </button>
+                  </h3>
+                  
+                  {showEmailConfig ? (
+                      <form onSubmit={saveEmailConfig} className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                           {/* Simple Mode (Default) */}
+                           <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                               <div className="flex items-center gap-2 mb-2">
+                                   <input 
+                                     type="radio" 
+                                     id="simple" 
+                                     name="provider" 
+                                     checked={emailConfig.provider === 'simple'}
+                                     onChange={() => setEmailConfig({...emailConfig, provider: 'simple'})}
+                                     className="text-indigo-500 focus:ring-indigo-500"
+                                   />
+                                   <label htmlFor="simple" className="text-white font-medium">Simple Mode (Recommended)</label>
+                               </div>
+                               <p className="text-xs text-gray-400 ml-6 mb-3">Uses FormSubmit. No API keys required. Just activate your email once.</p>
+                               
+                               {emailConfig.provider === 'simple' && (
+                                   <button 
+                                      type="button" 
+                                      onClick={handleSendActivation}
+                                      disabled={isSendingEmail}
+                                      className="ml-6 text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition"
+                                   >
+                                      Send Activation Email
+                                   </button>
+                               )}
+                           </div>
+
+                           {/* Advanced Mode (EmailJS) */}
+                           <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                               <div className="flex items-center gap-2 mb-2">
+                                   <input 
+                                     type="radio" 
+                                     id="emailjs" 
+                                     name="provider" 
+                                     checked={emailConfig.provider === 'emailjs'}
+                                     onChange={() => setEmailConfig({...emailConfig, provider: 'emailjs'})}
+                                     className="text-indigo-500 focus:ring-indigo-500"
+                                   />
+                                   <label htmlFor="emailjs" className="text-white font-medium">Advanced (EmailJS)</label>
+                               </div>
+                               
+                               {emailConfig.provider === 'emailjs' && (
+                                   <div className="space-y-3 mt-3 ml-6">
+                                       <div>
+                                           <label className="block text-xs text-gray-400 mb-1">Service ID</label>
+                                           <input 
+                                              type="text" 
+                                              value={emailConfig.serviceId || ''} 
+                                              onChange={e => setEmailConfig({...emailConfig, serviceId: e.target.value})}
+                                              className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white"
+                                           />
+                                       </div>
+                                       <div>
+                                           <label className="block text-xs text-gray-400 mb-1">Template ID</label>
+                                           <input 
+                                              type="text" 
+                                              value={emailConfig.templateId || ''} 
+                                              onChange={e => setEmailConfig({...emailConfig, templateId: e.target.value})}
+                                              className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white"
+                                           />
+                                       </div>
+                                       <div>
+                                           <label className="block text-xs text-gray-400 mb-1">Public Key</label>
+                                           <input 
+                                              type="text" 
+                                              value={emailConfig.publicKey || ''} 
+                                              onChange={e => setEmailConfig({...emailConfig, publicKey: e.target.value})}
+                                              className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white"
+                                           />
+                                       </div>
+                                   </div>
+                               )}
+                           </div>
+                           
+                           <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-sm">Save Configuration</button>
+                      </form>
+                  ) : (
+                      <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${emailConfig.provider === 'simple' ? 'bg-green-400' : 'bg-blue-400'}`}></div>
+                          <span className="text-sm text-gray-300">Using {emailConfig.provider === 'simple' ? 'Simple Mode (FormSubmit)' : 'EmailJS'}</span>
+                      </div>
+                  )}
+             </div>
+             
+             {/* Email History Log */}
+             <div className="glass-panel p-5 rounded-2xl">
+                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2"><History size={16}/> Email History</h3>
+                 <div className="max-h-40 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                     {emailHistory.length === 0 ? (
+                         <p className="text-xs text-gray-500 italic">No emails sent yet.</p>
+                     ) : (
+                         emailHistory.map(log => (
+                             <div key={log.id} className="flex justify-between items-center text-xs p-2 bg-gray-800/50 rounded border border-gray-700">
+                                 <div>
+                                     <div className="text-gray-300 font-medium">{log.subject}</div>
+                                     <div className="text-gray-500">{new Date(log.timestamp).toLocaleString()}</div>
+                                 </div>
+                                 <span className={`px-2 py-0.5 rounded ${log.status === 'sent' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                     {log.status}
+                                 </span>
+                             </div>
+                         ))
+                     )}
+                 </div>
+                 <button onClick={() => { localStorage.removeItem('paymate_email_history'); setEmailHistory([]); }} className="text-xs text-gray-500 hover:text-white mt-2 underline">Clear History</button>
+             </div>
+
+             {/* Support Section */}
+             <div className="grid grid-cols-2 gap-4">
+                 <button onClick={() => setShowHelp(true)} className="glass-panel p-4 rounded-xl flex flex-col items-center justify-center hover:bg-gray-800/50 transition border border-gray-700">
+                     <HelpCircle size={24} className="text-indigo-400 mb-2" />
+                     <span className="text-sm font-bold text-gray-300">Help & FAQ</span>
+                 </button>
+                 <button onClick={() => setShowAbout(true)} className="glass-panel p-4 rounded-xl flex flex-col items-center justify-center hover:bg-gray-800/50 transition border border-gray-700">
+                     <Info size={24} className="text-pink-400 mb-2" />
+                     <span className="text-sm font-bold text-gray-300">About App</span>
+                 </button>
+             </div>
+             
+             {/* Debug/Reset */}
+             <div className="text-center">
+                <button onClick={() => { localStorage.removeItem(`billmate_alerts_freq_${new Date().toISOString().split('T')[0]}`); setNotification({id:Date.now().toString(), message:"Alert limits cleared", type:"info"}); }} className="text-xs text-gray-600 hover:text-gray-400">
+                    Reset Daily Alert Limits (Debug)
+                </button>
+             </div>
+        </div>
+    );
+  };
+  
+  const renderAboutModal = () => (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="glass-panel max-w-sm w-full p-6 rounded-2xl relative">
+              <button onClick={() => setShowAbout(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20}/></button>
+              <div className="flex flex-col items-center mb-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-pink-500 rounded-2xl flex items-center justify-center mb-3 shadow-lg shadow-indigo-500/30">
+                      <span className="text-3xl font-bold text-white">P</span>
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Paymate</h2>
+                  <p className="text-gray-400 text-sm">v1.2.0</p>
+              </div>
+              <p className="text-gray-300 text-center mb-6 leading-relaxed">
+                  Never miss a bill payment again. Organize tasks, get intelligent reminders, and track your financial health in one place.
+              </p>
+              <div className="space-y-2 text-sm text-gray-400 mb-6">
+                  <div className="flex items-center gap-2"><CheckCircle size={16} className="text-green-400"/> Smart Bill Scanning and upload</div>
+                  <div className="flex items-center gap-2"><CheckCircle size={16} className="text-green-400"/> Interactive Dashboard</div>
+                  <div className="flex items-center gap-2"><CheckCircle size={16} className="text-green-400"/> Google Calendar Integration</div>
+                  <div className="flex items-center gap-2"><CheckCircle size={16} className="text-green-400"/> AI Financial Advice</div>
+              </div>
+              <div className="text-center text-xs text-gray-500 border-t border-gray-700 pt-4">
+                  Smart bill tracking and Task organizer
+              </div>
+          </div>
+      </div>
+  );
+  
+  const renderHelpModal = () => (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl relative max-h-[80vh] overflow-y-auto">
+              <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20}/></button>
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><HelpCircle/> Help & Support</h2>
+              
+              <div className="space-y-1">
+                  <FAQItem question="How do I scan a bill?" answer="Click 'Add Bill' then tap the camera icon area. You can upload an image or PDF. AI will automatically extract the details." />
+                  <FAQItem question="Why aren't I getting emails?" answer="1. Check your Spam folder. 2. Go to Settings > Email Config > Send Activation Email. 3. Click the 'Activate' link sent to your inbox." />
+                  <FAQItem question="How do device reminders work?" answer="Click the Calendar icon on any bill. It opens your phone's native calendar app to save a reminder that will ring even if this app is closed." />
+                  <FAQItem question="Is my data safe?" answer="Yes. All data is stored locally on your device. We do not have a backend server storing your personal financial data." />
+                  <FAQItem question="How do recurring bills work?" answer="Mark a bill as 'Recurring' when adding it. When you mark it as Paid, the app automatically creates a new bill for the next month." />
+              </div>
+              
+              <div className="mt-6 bg-indigo-500/10 border border-indigo-500/30 p-4 rounded-xl text-center">
+                  <p className="text-indigo-300 font-bold mb-1">Still need help?</p>
+                  <p className="text-gray-400 text-xs">Contact support at support@paymate.app</p>
+              </div>
+          </div>
+      </div>
+  );
+  
+  // Render Smart Payment Modal
+  const renderPaymentModal = () => {
+    if (!billToPayNow) return null;
+    
+    const detectedPlatform = detectPaymentPlatform(billToPayNow);
+    const paytmUrl = AGGREGATOR_LINKS[billToPayNow.category] || AGGREGATOR_LINKS['default'];
+    
+    // Determine the Deep Link for the Paytm App
+    const paytmAppUrl = PAYTM_APP_LINKS[billToPayNow.category] || PAYTM_APP_LINKS['default'];
+
+    // Check if UPI ID is missing for deep links validation
+    const isUpiMissing = !billToPayNow.upiId;
+
+    // Pass Consumer No in Transaction Note for visibility in UPI Apps
+    const note = `Bill Pay ${billToPayNow.consumerNumber ? 'Cons:' + billToPayNow.consumerNumber : ''}`;
+    
+    // Construct UPI Params
+    const upiParams = `pa=${billToPayNow.upiId || ''}&pn=${encodeURIComponent(billToPayNow.name)}&am=${billToPayNow.totalAmount}&cu=INR&tn=${encodeURIComponent(note)}`;
+    
+    const handleCopyDetails = () => {
+        if (billToPayNow.consumerNumber) {
+            navigator.clipboard.writeText(billToPayNow.consumerNumber);
+            setNotification({ id: Date.now().toString(), message: "Consumer Number copied to clipboard!", type: "success" });
+        }
+    };
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500 pb-24">
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-2xl font-bold">Financial Reports</h2>
-                <div className="flex gap-2">
-                    <button onClick={() => { /* Reuse handlers */ }} className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"><FileDown size={20} /></button>
-                    <button onClick={() => { /* Reuse handlers */ }} className="p-2 rounded-lg bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-all"><FileSpreadsheet size={20} /></button>
-                </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-                <div className="glass-panel p-5 rounded-2xl border-l-4 border-green-500"><p className="text-gray-400 text-xs uppercase tracking-wider font-bold">Total Paid</p><p className="text-2xl font-bold text-green-400 mt-1">₹{totalPaid.toLocaleString('en-IN')}</p></div>
-                <div className="glass-panel p-5 rounded-2xl border-l-4 border-orange-500"><p className="text-gray-400 text-xs uppercase tracking-wider font-bold">Pending</p><p className="text-2xl font-bold text-orange-400 mt-1">₹{totalPending.toLocaleString('en-IN')}</p></div>
-            </div>
-            <div className="glass-panel p-6 rounded-2xl">
-                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><BarChart2 size={20} className="text-indigo-400"/> Monthly Spending</h3>
-                <div className="flex items-end justify-between h-40 gap-2">
-                    {monthlyTrends.map((item, idx) => (
-                        <div key={idx} className="flex flex-col items-center flex-1 gap-2 group">
-                             <div className="w-full bg-gray-800 rounded-t-lg relative flex items-end justify-center overflow-hidden h-full"><div className="w-full bg-gradient-to-t from-indigo-600 to-purple-500 opacity-80 group-hover:opacity-100 transition-all duration-500 rounded-t-lg absolute bottom-0" style={{ height: `${(item.amount / maxTrend) * 100}%` }}></div></div>
-                             <span className="text-[10px] text-gray-400 font-medium uppercase">{item.label}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-             <div className="glass-panel p-6 rounded-2xl">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><PieChart size={20} className="text-pink-400"/> Top Expenses</h3>
-                <div className="space-y-4">
-                    {topCategories.map((cat, idx) => (
-                        <div key={idx}><div className="flex justify-between text-sm mb-1"><span className="text-gray-300 font-medium flex items-center gap-2">{getCategoryIcon(cat.category as BillCategory)} {cat.category}</span><span className="text-white font-bold">₹{cat.amount.toLocaleString('en-IN')}</span></div><div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden mt-1"><div className={`h-2.5 rounded-full ${['bg-blue-500', 'bg-pink-500', 'bg-yellow-500', 'bg-green-500', 'bg-purple-500'][idx % 5]}`} style={{ width: `${cat.percentage}%` }}></div></div></div>
-                    ))}
-                </div>
-            </div>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+           <div className="glass-panel p-6 rounded-3xl max-w-sm w-full relative border border-gray-700 bg-gray-900 shadow-2xl overflow-y-auto max-h-[90vh]">
+               <button onClick={() => setBillToPayNow(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><X size={20}/></button>
+               
+               <div className="text-center mb-6">
+                   <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center mb-3 p-2">
+                      <img src="https://cdn-icons-png.flaticon.com/512/825/825506.png" alt="UPI" className="w-full h-full object-contain" />
+                   </div>
+                   <h2 className="text-2xl font-bold text-white">Pay ₹{billToPayNow.totalAmount}</h2>
+                   <p className="text-gray-400 text-sm mt-1">to {billToPayNow.name}</p>
+               </div>
+               
+               {/* BBPS Fetch Section */}
+               {(billToPayNow.consumerNumber || billToPayNow.billerId) && (
+                   <div className="bg-indigo-900/30 border border-indigo-500/30 p-4 rounded-xl mb-4 text-center animate-in slide-in-from-bottom-2">
+                       <h4 className="text-indigo-300 font-bold text-sm mb-1">BBPS Details Found</h4>
+                       <p className="text-[10px] text-gray-400 mb-2">Consumer No: {billToPayNow.consumerNumber}</p>
+                       <a 
+                          href={`upi://pay?${upiParams}`}
+                          target="_blank" rel="noopener noreferrer"
+                          onClick={handleCopyDetails}
+                          className="block w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-xs transition"
+                       >
+                           Pay via UPI (ID Copied)
+                       </a>
+                       <p className="text-[9px] text-gray-500 mt-1">Number copied to clipboard. Paste in app if required.</p>
+                   </div>
+               )}
+
+               {/* Smart Payment Link (Direct Biller App/Site) */}
+               {detectedPlatform && (
+                  <div className="mb-2 animate-in slide-in-from-top-2">
+                      <a 
+                          href={detectedPlatform.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2 mb-2"
+                      >
+                          <Globe size={18} /> Pay on {detectedPlatform.name}
+                      </a>
+                  </div>
+               )}
+
+               {/* Pay via Paytm App */}
+               <div className="mb-2 animate-in slide-in-from-top-2">
+                    <a 
+                        href={paytmAppUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setNotification({id:Date.now().toString(), message:"Opening Paytm App... Please login if prompted.", type:"info"})}
+                        className="block w-full bg-gradient-to-r from-[#00baf2] to-[#002e6e] text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2"
+                    >
+                        <img src="https://cdn-icons-png.flaticon.com/512/825/825454.png" alt="Paytm" className="w-5 h-5 filter brightness-0 invert" />
+                        Pay via Paytm App
+                    </a>
+                    <p className="text-center text-[9px] text-gray-500 mt-1">Directly opens {billToPayNow.category} section in app</p>
+               </div>
+
+               {/* Pay via Paytm Website (Specific to Category) */}
+               <div className="mb-4">
+                    <a 
+                        href={paytmUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white py-3 rounded-xl font-bold text-center transition shadow-lg flex items-center justify-center gap-2"
+                    >
+                         <img src="https://cdn-icons-png.flaticon.com/512/825/825454.png" alt="Paytm" className="w-5 h-5" />
+                        Pay via Paytm Website
+                    </a>
+               </div>
+
+
+               {/* QR Code Section */}
+               <div className="bg-white p-4 rounded-xl mb-6 mx-auto w-fit shadow-lg">
+                   {isUpiMissing ? (
+                       <div className="w-[150px] h-[150px] flex flex-col items-center justify-center text-gray-400 text-xs text-center border-2 border-dashed border-gray-300">
+                           <AlertTriangle size={24} className="mb-2 text-orange-400"/>
+                           No UPI ID Found
+                       </div>
+                   ) : (
+                       <QRCodeSVG 
+                          value={`upi://pay?${upiParams}`}
+                          size={150}
+                          level="M"
+                       />
+                   )}
+               </div>
+               
+               <div className="space-y-3">
+                   <div className="text-xs text-gray-400 text-center font-bold mb-1 uppercase tracking-wide">Pay via UPI Apps</div>
+                   
+                   {isUpiMissing && (
+                       <div className="bg-orange-500/10 border border-orange-500/20 p-2 rounded-lg text-xs text-orange-300 text-center mb-2">
+                           Biller UPI ID is missing. Edit bill to enable app buttons.
+                       </div>
+                   )}
+
+                   {/* Specific UPI App Buttons */}
+                   <div className={`grid grid-cols-3 gap-2 mb-3 ${isUpiMissing ? 'opacity-50 pointer-events-none' : ''}`}>
+                       <a href={`tez://upi/pay?${upiParams}`}
+                          target="_blank" rel="noopener noreferrer"
+                          onClick={() => {
+                              handleCopyDetails();
+                              setNotification({id:Date.now().toString(), message:"Opening GPay...", type:"info"});
+                          }}
+                          className="flex flex-col items-center justify-center bg-gray-800 hover:bg-gray-700 p-2 rounded-xl border border-gray-600 transition"
+                       >
+                           <img src="https://cdn-icons-png.flaticon.com/512/6124/6124998.png" alt="GPay" className="w-8 h-8 mb-1" />
+                           <span className="text-[10px] text-gray-300">GPay</span>
+                       </a>
+                       <a href={`phonepe://pay?${upiParams}`}
+                          target="_blank" rel="noopener noreferrer"
+                          onClick={() => {
+                              handleCopyDetails();
+                              setNotification({id:Date.now().toString(), message:"Opening PhonePe...", type:"info"});
+                          }}
+                          className="flex flex-col items-center justify-center bg-gray-800 hover:bg-gray-700 p-2 rounded-xl border border-gray-600 transition"
+                       >
+                           <img src="https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/phonepe-icon.png" alt="PhonePe" className="w-8 h-8 mb-1 rounded-lg" />
+                           <span className="text-[10px] text-gray-300">PhonePe</span>
+                       </a>
+                       <a href={`paytmmp://pay?${upiParams}`}
+                           target="_blank" rel="noopener noreferrer"
+                           onClick={() => {
+                               handleCopyDetails();
+                               setNotification({id:Date.now().toString(), message:"Opening Paytm...", type:"info"});
+                           }}
+                           className="flex flex-col items-center justify-center bg-gray-800 hover:bg-gray-700 p-2 rounded-xl border border-gray-600 transition"
+                       >
+                           <img src="https://cdn-icons-png.flaticon.com/512/825/825454.png" alt="Paytm" className="w-8 h-8 mb-1" />
+                           <span className="text-[10px] text-gray-300">Paytm</span>
+                       </a>
+                   </div>
+
+                   {/* Generic UPI Button */}
+                   <a 
+                      href={`upi://pay?${upiParams}`}
+                      target="_blank" rel="noopener noreferrer"
+                      onClick={handleCopyDetails}
+                      className={`block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 rounded-xl font-bold text-center transition shadow-lg transform active:scale-95 ${isUpiMissing ? 'opacity-50 pointer-events-none' : ''}`}
+                   >
+                       Open UPI App (Generic)
+                   </a>
+
+                   {/* Mark as Paid Button */}
+                   <button 
+                      onClick={handlePayViaUPI}
+                      className="block w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold transition shadow-lg mt-4"
+                   >
+                       I Have Paid (Mark Done)
+                   </button>
+               </div>
+           </div>
         </div>
     );
   };
 
   return (
-    <div className="min-h-screen flex flex-col relative">
-      <NotificationToast notification={notification} onClose={() => setNotification(null)} />
-      
-      <header className="sticky top-0 z-30 bg-gray-900/80 backdrop-blur-md p-4 flex justify-between items-center border-b border-gray-800">
-         <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center text-white font-bold">P</div>
-            <h1 className="text-xl font-bold tracking-tight text-white">Paymate</h1>
-         </div>
-         <div className="flex items-center gap-4 text-gray-400">
-            <button className="hover:text-white" onClick={() => setActiveTab('bills')}><Search size={20} /></button>
-            <button className="hover:text-white relative"><Bell size={20} />{notification && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>}</button>
-            <button onClick={onLogout} className="hover:text-white"><LogOut size={20} /></button>
-         </div>
-      </header>
-
-      <main className="flex-1 p-4 max-w-4xl mx-auto w-full z-10">
+    <div className="min-h-screen pb-20 relative">
+      <div className="max-w-4xl mx-auto px-4 pt-6">
+        
+        {/* Main Content Area */}
         {activeTab === 'home' && renderHome()}
         {activeTab === 'bills' && renderBillList()}
         {activeTab === 'tasks' && renderTasks()}
-        {activeTab === 'calendar' && (
-            <div className="flex flex-col items-center justify-center h-[60vh] text-center px-6 animate-in fade-in zoom-in duration-300">
-                <div className="bg-gray-800/50 p-8 rounded-full mb-6 ring-1 ring-white/5"><CalendarIcon size={64} className="text-gray-600" /></div>
-                <h3 className="text-xl font-bold text-white mb-2">Calendar View</h3>
-                <p className="text-gray-400 max-w-sm text-sm">See all your upcoming bills and tasks here. (Coming Soon)</p>
-            </div>
-        )}
         {activeTab === 'reports' && renderReports()}
-        {activeTab === 'settings' && (
-            <div className="glass-panel p-6 rounded-2xl space-y-4 animate-in fade-in pb-24">
-                <h2 className="text-xl font-bold mb-4">Settings</h2>
-                
-                <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
-                    <div className="flex items-center gap-2 text-indigo-300 font-semibold mb-2"><Mail size={18} /> Email Alerts</div>
-                    <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-                        To receive alerts, you must configure your <strong>EmailJS</strong> keys below.
-                        <br/>
-                        Sign up for free at <a href="https://www.emailjs.com" target="_blank" className="text-blue-400 underline">emailjs.com</a>.
-                    </p>
-                    
-                    {!showEmailConfig ? (
-                        <button onClick={() => setShowEmailConfig(true)} className="text-sm bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-white font-medium flex items-center gap-2">
-                            <Key size={14} /> Configure Keys
-                        </button>
-                    ) : (
-                        <form onSubmit={saveEmailConfig} className="space-y-3 mt-4 bg-black/20 p-4 rounded-lg">
-                            <div>
-                                <label className="text-xs text-gray-400">Service ID</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
-                                    placeholder="service_xxxxx" 
-                                    value={emailConfig.serviceId}
-                                    onChange={e => setEmailConfig({...emailConfig, serviceId: e.target.value})}
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-400">Template ID</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
-                                    placeholder="template_xxxxx" 
-                                    value={emailConfig.templateId}
-                                    onChange={e => setEmailConfig({...emailConfig, templateId: e.target.value})}
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs text-gray-400">Public Key (User ID)</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-white" 
-                                    placeholder="user_xxxxx" 
-                                    value={emailConfig.publicKey}
-                                    onChange={e => setEmailConfig({...emailConfig, publicKey: e.target.value})}
-                                />
-                            </div>
-                            <div className="flex gap-2 pt-2">
-                                <button type="submit" className="bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded text-xs font-bold text-white">Save</button>
-                                <button type="button" onClick={() => setShowEmailConfig(false)} className="bg-gray-700 px-3 py-1.5 rounded text-xs text-white">Cancel</button>
-                            </div>
-                        </form>
-                    )}
-                </div>
+        {activeTab === 'settings' && renderSettings()}
 
-                <div onClick={toggleEmailNotifications} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-xl cursor-pointer hover:bg-gray-800 transition">
-                    <div className="flex items-center gap-3"><div className={`p-2 rounded-lg ${emailNotifications ? 'bg-indigo-500/20 text-indigo-400' : 'bg-gray-700 text-gray-400'}`}><Mail size={20} /></div><div><span className="block font-medium">Email Alerts</span><span className="text-xs text-gray-400">Get notified for bills & tasks</span></div></div>
-                    <div className={`w-12 h-6 rounded-full relative transition-colors ${emailNotifications ? 'bg-indigo-600' : 'bg-gray-600'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailNotifications ? 'right-1' : 'left-1'}`}></div></div>
-                </div>
-
-                <div onClick={requestNotificationPermission} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-xl cursor-pointer hover:bg-gray-800 transition">
-                    <div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-pink-500/20 text-pink-400"><Smartphone size={20} /></div><div><span className="block font-medium">Push Notifications</span><span className="text-xs text-gray-400">Enable device alerts</span></div></div>
-                     <span className="text-xs text-pink-400 font-bold px-3 py-1 bg-pink-500/10 rounded-full">ENABLE</span>
-                </div>
-                
-                <button 
-                    onClick={handleTestAlert} 
-                    disabled={isSendingEmail}
-                    className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
-                             {isSendingEmail ? <Loader2 size={20} className="animate-spin" /> : <Volume2 size={20} />}
-                        </div>
-                        <span>{isSendingEmail ? 'Sending...' : 'Send Test Alert / Email'}</span>
-                    </div>
-                    <span className="text-xs text-indigo-400 font-bold">TEST</span>
-                </button>
-                
-                {/* Email History Section */}
-                <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
-                    <div className="flex items-center gap-2 mb-3 text-white font-medium">
-                        <History size={18} className="text-gray-400" /> 
-                        Email History <span className="text-xs font-normal text-gray-500">(Stored Locally)</span>
-                    </div>
-                    {emailHistory.length === 0 ? (
-                        <p className="text-xs text-gray-500 italic">No emails sent yet.</p>
-                    ) : (
-                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2 no-scrollbar">
-                            {emailHistory.map(log => (
-                                <div key={log.id} className="flex items-center justify-between text-xs p-2 bg-gray-800/50 rounded-lg">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-gray-300 font-medium">{log.subject}</span>
-                                        <span className="text-gray-500">{new Date(log.timestamp).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
-                                    </div>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${log.status === 'sent' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                        {log.status}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                <button onClick={resetDailyAlerts} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-orange-500/20 text-orange-400"><RefreshCw size={20} /></div><span>Reset Alert History</span></div><span className="text-xs text-orange-400 font-bold">RESET</span></button>
-                
-                <button onClick={() => setShowHelp(true)} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-teal-500/20 text-teal-400"><HelpCircle size={20} /></div>
-                        <span className="font-medium">Help & Support</span>
-                    </div>
-                    <ChevronRight size={16} className="text-gray-500" />
-                </button>
-
-                <button onClick={() => setShowAbout(true)} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-blue-500/20 text-blue-400"><Info size={20} /></div>
-                        <span className="font-medium">About Paymate</span>
-                    </div>
-                    <ChevronRight size={16} className="text-gray-500" />
-                </button>
-
-                <button onClick={onLogout} className="w-full p-4 bg-red-500/10 text-red-400 rounded-xl mt-4 font-medium hover:bg-red-500/20 transition">Sign Out</button>
-             </div>
+        {/* Floating Add Button (Mobile Only, visible on Home/Bills) */}
+        {(activeTab === 'home' || activeTab === 'bills') && (
+            <button 
+                onClick={() => setShowAddForm(true)}
+                className="fixed bottom-24 right-6 bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-full shadow-2xl shadow-indigo-900/50 z-40 md:hidden transition-transform hover:scale-110 active:scale-95"
+            >
+                <Plus size={28} />
+            </button>
         )}
-      </main>
+      </div>
 
-      {/* Conditional FAB: Only show Bill Add on Home/Bills, Task Add handled in tasks tab header for cleaner UX, or can add generic FAB here */}
-      {activeTab === 'bills' && (
-        <button onClick={() => { setEditingBill(null); setShowAddForm(true); }} className="fixed bottom-24 right-4 z-40 bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-full shadow-lg shadow-indigo-600/40 transition-transform hover:scale-105 active:scale-95">
-            <Plus size={24} />
-        </button>
+      {/* Bottom Navigation */}
+      <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-[90%] max-w-md">
+        <div className="glass-panel rounded-full px-6 py-3 flex justify-between items-center shadow-2xl border border-gray-700/50 backdrop-blur-xl">
+            <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition ${activeTab === 'home' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                <HomeIcon size={22} className={activeTab === 'home' ? 'fill-indigo-400/20' : ''} />
+                <span className="text-[10px] font-medium">Home</span>
+            </button>
+            <button onClick={() => setActiveTab('bills')} className={`flex flex-col items-center gap-1 transition ${activeTab === 'bills' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                <Receipt size={22} className={activeTab === 'bills' ? 'fill-indigo-400/20' : ''} />
+                <span className="text-[10px] font-medium">Bills</span>
+            </button>
+             <button onClick={() => setActiveTab('tasks')} className={`flex flex-col items-center gap-1 transition ${activeTab === 'tasks' ? 'text-pink-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                <ListTodo size={22} className={activeTab === 'tasks' ? 'fill-pink-400/20' : ''} />
+                <span className="text-[10px] font-medium">To-Do</span>
+            </button>
+            <button onClick={() => setActiveTab('reports')} className={`flex flex-col items-center gap-1 transition ${activeTab === 'reports' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                <BarChart2 size={22} className={activeTab === 'reports' ? 'fill-indigo-400/20' : ''} />
+                <span className="text-[10px] font-medium">Reports</span>
+            </button>
+            <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 transition ${activeTab === 'settings' ? 'text-indigo-400' : 'text-gray-500 hover:text-gray-300'}`}>
+                <Settings size={22} className={activeTab === 'settings' ? 'fill-indigo-400/20' : ''} />
+                <span className="text-[10px] font-medium">Settings</span>
+            </button>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {showAddForm && (
+        <BillForm 
+          userId={user.id} 
+          onClose={() => { setShowAddForm(false); setEditingBill(null); }} 
+          onSave={handleSaveBill}
+          initialData={editingBill || undefined}
+        />
+      )}
+      
+      {showTaskForm && (
+          <TaskForm 
+            userId={user.id}
+            onClose={() => { setShowTaskForm(false); setEditingTask(null); }}
+            onSave={handleSaveTask}
+            initialData={editingTask || undefined}
+          />
+      )}
+      
+      {/* Delete Confirmation Modal */}
+      {(billToDelete || taskToDelete) && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="glass-panel p-6 rounded-2xl max-w-xs w-full text-center border border-gray-700">
+                <div className="bg-red-500/10 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                    <Trash2 size={32} className="text-red-500" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Delete Item?</h3>
+                <p className="text-gray-400 text-sm mb-6">Are you sure you want to delete this? This action cannot be undone.</p>
+                <div className="flex gap-3">
+                    <button onClick={() => { setBillToDelete(null); setTaskToDelete(null); }} className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition">Cancel</button>
+                    <button onClick={billToDelete ? handleDeleteBill : handleDeleteTask} className="flex-1 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-bold transition">Delete</button>
+                </div>
+            </div>
+        </div>
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-gray-900/90 backdrop-blur-xl border-t border-gray-800 pb-safe">
-        <div className="flex justify-around items-center h-16 max-w-lg mx-auto">
-            <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'home' ? 'text-indigo-400' : 'text-gray-500'}`}><Home size={20} /><span className="text-[10px] font-medium">Home</span></button>
-            <button onClick={() => setActiveTab('bills')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'bills' ? 'text-indigo-400' : 'text-gray-500'}`}><FileText size={20} /><span className="text-[10px] font-medium">Bills</span></button>
-            <button onClick={() => setActiveTab('tasks')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'tasks' ? 'text-pink-400' : 'text-gray-500'}`}><ListTodo size={20} /><span className="text-[10px] font-medium">To-Do</span></button>
-             <button onClick={() => setActiveTab('reports')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'reports' ? 'text-indigo-400' : 'text-gray-500'}`}><BarChart2 size={20} /><span className="text-[10px] font-medium">Reports</span></button>
-             <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'settings' ? 'text-indigo-400' : 'text-gray-500'}`}><Settings size={20} /><span className="text-[10px] font-medium">Settings</span></button>
-        </div>
-      </nav>
-
-      {showAddForm && <BillForm userId={user.id} onClose={() => { setShowAddForm(false); setEditingBill(null); }} onSave={handleSaveBill} initialData={editingBill || undefined} />}
-      {showTaskForm && <TaskForm userId={user.id} onClose={() => { setShowTaskForm(false); setEditingTask(null); }} onSave={handleSaveTask} initialData={editingTask || undefined} />}
-      
-      {showAbout && renderAboutModal()}
-      {showHelp && renderHelpModal()}
-      
-      {/* Bill Toggle Payment Confirmation Modal */}
+      {/* Toggle Paid Confirmation Modal */}
       {billToTogglePay && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="glass-panel w-full max-w-sm rounded-xl p-6 shadow-2xl border border-indigo-500/30">
-             <div className="flex flex-col items-center text-center">
-                <div className={`p-3 rounded-full mb-4 ${!billToTogglePay.isPaid ? 'bg-green-500/20' : 'bg-yellow-500/20'}`}>
-                    {!billToTogglePay.isPaid ? <CheckCircle size={32} className="text-green-500" /> : <RefreshCw size={32} className="text-yellow-500" />}
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+             <div className="glass-panel p-6 rounded-2xl max-w-sm w-full text-center border border-gray-700">
+                <div className={`p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 ${billToTogglePay.isPaid ? 'bg-gray-700' : 'bg-green-500/20'}`}>
+                    {billToTogglePay.isPaid ? <X size={32} className="text-gray-400" /> : <CheckCircle size={32} className="text-green-500" />}
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">{!billToTogglePay.isPaid ? 'Mark as Paid?' : 'Mark as Unpaid?'}</h3>
-                
-                <p className="text-gray-300 mb-2">
-                    Are you sure you want to mark <strong>{billToTogglePay.name}</strong> as {!billToTogglePay.isPaid ? 'paid' : 'unpaid'}?
+                <h3 className="text-xl font-bold text-white mb-2">
+                    Mark as {billToTogglePay.isPaid ? 'Unpaid' : 'Paid'}?
+                </h3>
+                <p className="text-gray-400 text-sm mb-4">
+                    {billToTogglePay.isPaid 
+                        ? "This will mark the bill as pending again." 
+                        : "Great job paying this bill off!"}
                 </p>
-
-                {billToTogglePay.isRecurring && !billToTogglePay.isPaid && (
-                    <div className="bg-indigo-500/20 p-3 rounded-lg mb-4 text-left w-full border border-indigo-500/30">
-                        <p className="text-xs text-indigo-200 flex items-start gap-2">
-                            <Info size={14} className="mt-0.5 flex-shrink-0" />
-                            <span>This is a <strong>recurring bill</strong>. Marking it as paid will automatically create a new bill for next month.</span>
-                        </p>
+                
+                {!billToTogglePay.isPaid && billToTogglePay.isRecurring && (
+                    <div className="bg-indigo-500/10 border border-indigo-500/30 p-3 rounded-lg mb-6 text-left">
+                        <p className="text-indigo-300 text-xs font-bold flex items-center gap-1 mb-1"><Repeat size={12}/> Recurring Bill Detected</p>
+                        <p className="text-gray-400 text-xs">Marking this as paid will <span className="text-white font-bold">automatically create a new bill</span> for next month.</p>
                     </div>
                 )}
 
-                <div className="flex gap-3 w-full mt-4">
-                  <button onClick={() => setBillToTogglePay(null)} className="flex-1 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition">Cancel</button>
-                  <button 
-                    onClick={executeTogglePaid} 
-                    className={`flex-1 px-4 py-2 rounded-lg text-white font-medium transition shadow-lg ${!billToTogglePay.isPaid ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20' : 'bg-yellow-600 hover:bg-yellow-700 shadow-yellow-500/20'}`}
-                  >
-                    Confirm
-                  </button>
+                <div className="flex gap-3">
+                    <button onClick={() => setBillToTogglePay(null)} className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white font-medium transition">Cancel</button>
+                    <button onClick={executeTogglePaid} className={`flex-1 py-2 rounded-lg text-white font-bold transition ${billToTogglePay.isPaid ? 'bg-gray-600 hover:bg-gray-500' : 'bg-green-600 hover:bg-green-700'}`}>
+                        Confirm
+                    </button>
                 </div>
              </div>
           </div>
-        </div>
       )}
 
-      {billToDelete && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="glass-panel w-full max-w-sm rounded-xl p-6 shadow-2xl border border-red-500/30">
-             <div className="flex flex-col items-center text-center">
-                <div className="bg-red-500/20 p-3 rounded-full mb-4"><AlertTriangle size={32} className="text-red-500" /></div>
-                <h3 className="text-xl font-bold text-white mb-2">Delete Bill?</h3>
-                <p className="text-gray-300 mb-6">Are you sure you want to permanently delete this bill?</p>
-                <div className="flex gap-3 w-full">
-                  <button onClick={() => setBillToDelete(null)} className="flex-1 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition">Cancel</button>
-                  <button onClick={confirmDeleteBill} className="flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition shadow-lg shadow-red-500/20">Delete</button>
-                </div>
-             </div>
-          </div>
-        </div>
-      )}
+      {/* Payment Gateway Modal (UPI & Direct Link) */}
+      {renderPaymentModal()}
 
-      {taskToDelete && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="glass-panel w-full max-w-sm rounded-xl p-6 shadow-2xl border border-red-500/30">
-             <div className="flex flex-col items-center text-center">
-                <div className="bg-red-500/20 p-3 rounded-full mb-4"><AlertTriangle size={32} className="text-red-500" /></div>
-                <h3 className="text-xl font-bold text-white mb-2">Delete Task?</h3>
-                <p className="text-gray-300 mb-6">Are you sure you want to delete this task?</p>
-                <div className="flex gap-3 w-full">
-                  <button onClick={() => setTaskToDelete(null)} className="flex-1 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition">Cancel</button>
-                  <button onClick={confirmDeleteTask} className="flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition shadow-lg shadow-red-500/20">Delete</button>
-                </div>
-             </div>
-          </div>
-        </div>
-      )}
+      {showAbout && renderAboutModal()}
+      {showHelp && renderHelpModal()}
+      
+      <NotificationToast 
+        notification={notification} 
+        onClose={() => setNotification(null)} 
+      />
     </div>
   );
 };
