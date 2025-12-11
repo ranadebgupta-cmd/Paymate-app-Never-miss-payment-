@@ -1,0 +1,7 @@
+{
+  "name": "Paymate",
+  "description": "Never miss bill payment. Smart Bill Tracking Manager with due date reminders and audio alerts.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
