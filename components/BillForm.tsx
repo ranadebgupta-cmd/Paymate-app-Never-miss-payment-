@@ -1,8 +1,8 @@
 
 import React, { useState, useRef } from 'react';
-import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, AlertCircle, CheckSquare, Smartphone, Link as LinkIcon, Hash } from 'lucide-react';
+import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, AlertCircle, CheckSquare, Smartphone, Link as LinkIcon, Hash, Lock, Unlock } from 'lucide-react';
 import { Bill, BillCategory } from '../types';
-import { extractBillDetails } from '../services/geminiService';
+import { extractBillDetails, processPdfFile } from '../services/geminiService';
 
 interface Props {
   userId: string;
@@ -44,6 +44,11 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
   const [scanFeedback, setScanFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // PDF Password Handling
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [pdfPassword, setPdfPassword] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
   const generateId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -51,23 +56,46 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = async (file: File, password?: string) => {
     setIsScanning(true);
     setScanFeedback(null);
+    setShowPasswordPrompt(false);
 
     try {
-      // Convert to Base64
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        // Remove data URL prefix (e.g., "data:image/jpeg;base64,")
-        const base64Data = base64String.split(',')[1];
-        
-        const extractedData = await extractBillDetails(base64Data, file.type);
-        
+        let extractedData = null;
+
+        if (file.type === 'application/pdf') {
+            // Handle PDF (Text Extraction or Render to Image)
+            try {
+                const result = await processPdfFile(file, password);
+                if (result) {
+                    // result.data is either text string or base64 image string
+                    extractedData = await extractBillDetails(result.data, result.type === 'text' ? 'text' : 'base64_image');
+                }
+            } catch (err: any) {
+                if (err.message === 'PASSWORD_REQUIRED') {
+                    setPendingFile(file);
+                    setShowPasswordPrompt(true);
+                    setIsScanning(false);
+                    return;
+                }
+                throw err;
+            }
+        } else {
+            // Handle Images (JPG, PNG)
+            const reader = new FileReader();
+            await new Promise<void>((resolve, reject) => {
+                reader.onloadend = async () => {
+                    const base64String = reader.result as string;
+                    const base64Data = base64String.split(',')[1];
+                    extractedData = await extractBillDetails(base64Data, 'base64_image');
+                    resolve();
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
         if (extractedData) {
           if (extractedData.name) setName(extractedData.name);
           if (extractedData.totalAmount) setTotalAmount(extractedData.totalAmount.toString());
@@ -75,35 +103,45 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
           if (extractedData.dueDate) setDueDate(extractedData.dueDate);
           if (extractedData.paymentUrl) setPaymentUrl(extractedData.paymentUrl);
           
-          // Validate category before setting
           if (extractedData.category && CATEGORIES.includes(extractedData.category)) {
             setCategory(extractedData.category);
           }
 
           setScanFeedback({
             type: 'success',
-            message: "Scan complete! Please review and verify the details below before saving."
+            message: "Scan complete! Details extracted successfully."
           });
+          // Clear sensitive data
+          setPdfPassword('');
+          setPendingFile(null);
         } else {
            setScanFeedback({
              type: 'error',
-             message: "Could not extract details. Please fill the form manually."
+             message: "Could not extract details. Please fill manually."
            });
         }
-        setIsScanning(false);
-      };
-      reader.readAsDataURL(file);
     } catch (error) {
-      console.error("Scanning failed", error);
+      console.error("Processing failed", error);
       setScanFeedback({
           type: 'error',
-          message: "Error processing file. Please try again."
+          message: "Error processing file. Try a clear image or unlocked PDF."
       });
-      setIsScanning(false);
+    } finally {
+        setIsScanning(false);
     }
-    
-    // Reset input to allow selecting the same file again if needed
-    e.target.value = '';
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+    e.target.value = ''; // Reset input
+  };
+
+  const handlePasswordSubmit = () => {
+     if (pendingFile && pdfPassword) {
+         processFile(pendingFile, pdfPassword);
+     }
   };
 
   const executeSave = () => {
@@ -157,7 +195,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
 
         {/* Scan / Upload Section */}
         <div 
-          onClick={() => !isScanning && fileInputRef.current?.click()}
+          onClick={() => !isScanning && !showPasswordPrompt && fileInputRef.current?.click()}
           className={`mb-6 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${isScanning ? 'border-indigo-500 bg-indigo-500/10' : 'border-gray-600 hover:border-indigo-400 hover:bg-gray-800/50'}`}
         >
           <input 
@@ -171,8 +209,8 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
           {isScanning ? (
             <div className="flex flex-col items-center animate-pulse">
               <Loader2 size={32} className="text-indigo-400 animate-spin mb-2" />
-              <p className="text-indigo-300 font-medium">Analyzing Bill...</p>
-              <p className="text-xs text-indigo-400/70">Extracting details with AI</p>
+              <p className="text-indigo-300 font-medium">Processing Document...</p>
+              <p className="text-xs text-indigo-400/70">Decrypting & Analyzing</p>
             </div>
           ) : (
             <>
@@ -181,7 +219,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
                 <div className="bg-gray-700 p-3 rounded-full"><Upload size={24} className="text-gray-300" /></div>
               </div>
               <p className="text-white font-medium">{initialData ? 'Rescan Bill / Update File' : 'Scan Bill or Upload PDF'}</p>
-              <p className="text-gray-400 text-xs mt-1">Supports Images & PDF Documents</p>
+              <p className="text-gray-400 text-xs mt-1">Supports Images & Protected PDFs</p>
             </>
           )}
         </div>
@@ -386,6 +424,43 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
               </div>
             </div>
           </div>
+        )}
+
+        {/* Password Prompt Modal */}
+        {showPasswordPrompt && (
+            <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-md rounded-2xl animate-in fade-in duration-200">
+                <div className="p-6 text-center max-w-xs w-full">
+                    <div className="bg-indigo-500/20 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 border border-indigo-500/50">
+                        <Lock size={32} className="text-indigo-400" />
+                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2">Encrypted PDF</h3>
+                    <p className="text-gray-400 text-sm mb-4">This file is password protected. Enter password to unlock.</p>
+                    
+                    <input 
+                        type="password" 
+                        value={pdfPassword}
+                        onChange={(e) => setPdfPassword(e.target.value)}
+                        placeholder="File Password"
+                        className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-white mb-4 focus:ring-2 focus:ring-indigo-500 outline-none text-center tracking-widest"
+                        autoFocus
+                    />
+
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={() => { setShowPasswordPrompt(false); setPendingFile(null); setPdfPassword(''); }} 
+                            className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white text-sm font-medium transition"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={handlePasswordSubmit}
+                            className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white text-sm font-bold transition flex items-center justify-center gap-2"
+                        >
+                            <Unlock size={14} /> Unlock
+                        </button>
+                    </div>
+                </div>
+            </div>
         )}
       </div>
     </div>

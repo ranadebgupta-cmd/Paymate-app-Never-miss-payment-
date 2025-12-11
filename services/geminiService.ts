@@ -1,6 +1,10 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Bill, BillCategory } from "../types";
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Initialize PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@4.2.67/build/pdf.worker.min.mjs`;
 
 // Note: In a production app, the API key should be proxy-ed through a backend.
 // We assume process.env.API_KEY is available as per instructions.
@@ -46,12 +50,71 @@ export interface ExtractedBillData {
   paymentUrl?: string;
 }
 
-export const extractBillDetails = async (base64Data: string, mimeType: string): Promise<ExtractedBillData | null> => {
+/**
+ * Processes a PDF file. 
+ * - Handles Password Protection.
+ * - Extracts text if digital PDF.
+ * - Renders first page to image if scanned PDF.
+ */
+export const processPdfFile = async (file: File, password?: string): Promise<{ type: 'text' | 'image', data: string } | null> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    
+    // Load PDF
+    const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        password: password
+    });
+
+    const pdf = await loadingTask.promise;
+    const maxPages = Math.min(pdf.numPages, 3); // Analyze first 3 pages max
+    let fullText = '';
+    
+    // Try Extracting Text first (Cheaper & Faster)
+    for (let i = 1; i <= maxPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item: any) => item.str).join(' ');
+        fullText += `--- Page ${i} ---\n${pageText}\n`;
+    }
+
+    // Heuristic: If we extracted a good amount of text, it's a digital PDF.
+    // If text is very short/empty, it's likely a scanned image inside a PDF.
+    if (fullText.length > 50) {
+        return { type: 'text', data: fullText };
+    }
+
+    // Fallback: Scanned PDF -> Render Page 1 to Image
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 }); // High res for OCR
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    if (context) {
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        return { type: 'image', data: base64Image };
+    }
+    
+    return null;
+
+  } catch (error: any) {
+    if (error.name === 'PasswordException') {
+        throw new Error('PASSWORD_REQUIRED');
+    }
+    console.error("PDF Processing Error", error);
+    throw new Error('PDF_PROCESSING_FAILED');
+  }
+};
+
+export const extractBillDetails = async (inputData: string, inputType: 'base64_image' | 'text' | 'pdf_text'): Promise<ExtractedBillData | null> => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
-    const prompt = `
-      Analyze this bill/invoice image or PDF. Extract the following details in JSON format:
+    const basePrompt = `
+      Analyze this bill/invoice data. Extract the following details in JSON format:
       1. 'name': The biller name, bank name, or merchant.
       2. 'totalAmount': The total amount due (number only).
       3. 'minDueAmount': The minimum due amount if available, otherwise 0.
@@ -62,19 +125,30 @@ export const extractBillDetails = async (base64Data: string, mimeType: string): 
       Return ONLY the JSON object. Do not wrap in markdown code blocks.
     `;
 
+    let contents;
+
+    if (inputType === 'text' || inputType === 'pdf_text') {
+        contents = {
+            parts: [{ text: `Here is the text content extracted from a bill:\n\n${inputData}\n\n${basePrompt}` }]
+        };
+    } else {
+        // Base64 Image (Scanned PDF or Image File)
+        contents = {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: inputData
+                }
+              },
+              { text: basePrompt }
+            ]
+        };
+    }
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data
-            }
-          },
-          { text: prompt }
-        ]
-      },
+      contents: contents,
       config: {
         responseMimeType: "application/json"
       }
@@ -82,7 +156,7 @@ export const extractBillDetails = async (base64Data: string, mimeType: string): 
 
     if (response.text) {
       let text = response.text.trim();
-      // Remove markdown code blocks if present (just in case the model adds them despite responseMimeType)
+      // Clean potential markdown wrapping
       if (text.startsWith('```json')) {
         text = text.replace(/^```json/, '').replace(/```$/, '');
       } else if (text.startsWith('```')) {
