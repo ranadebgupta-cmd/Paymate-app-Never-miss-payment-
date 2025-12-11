@@ -53,6 +53,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
 
   const [notification, setNotification] = useState<NotificationItem | null>(null);
   const [billToDelete, setBillToDelete] = useState<string | null>(null);
+  const [billToTogglePay, setBillToTogglePay] = useState<Bill | null>(null); // New state for confirmation
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('home');
   
@@ -384,7 +385,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
             notifiedItems.push(dueId);
             updatedNotified = true;
             triggered = true;
-        }
+          }
       }
 
       if (triggered) {
@@ -486,7 +487,10 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     setEditingBill(null);
   };
 
-  const handleMarkPaid = (bill: Bill) => {
+  const executeTogglePaid = () => {
+    if (!billToTogglePay) return;
+    const bill = billToTogglePay;
+    
     const isPaying = !bill.isPaid;
     const updated = { ...bill, isPaid: isPaying };
     storageService.updateBill(updated);
@@ -498,8 +502,11 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         const newBill: Bill = { ...bill, id: generateId(), dueDate: nextDueDateStr, isPaid: false };
         storageService.saveBill(newBill);
         setNotification({ id: Date.now().toString(), message: `Recurring bill created for next month`, type: 'success' });
+    } else {
+        setNotification({ id: Date.now().toString(), message: `Bill marked as ${isPaying ? 'Paid' : 'Unpaid'}`, type: 'success' });
     }
     loadBills();
+    setBillToTogglePay(null);
   };
 
   const confirmDeleteBill = () => {
@@ -780,7 +787,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
                       </div>
                     </div>
                     <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                      <button onClick={() => handleMarkPaid(bill)} title={bill.isPaid ? "Mark as Unpaid" : "Mark as Paid"} className={`p-2 rounded-lg transition-all duration-200 transform hover:scale-110 ${bill.isPaid ? 'bg-yellow-600/20 text-yellow-500 hover:bg-yellow-600/40' : 'bg-green-600/20 text-green-500 hover:bg-green-600/40 shadow-lg shadow-green-900/20'}`}>{bill.isPaid ? <RefreshCw size={20} /> : <CheckCircle size={20} />}</button>
+                      <button onClick={() => setBillToTogglePay(bill)} title={bill.isPaid ? "Mark as Unpaid" : "Mark as Paid"} className={`p-2 rounded-lg transition-all duration-200 transform hover:scale-110 ${bill.isPaid ? 'bg-yellow-600/20 text-yellow-500 hover:bg-yellow-600/40' : 'bg-green-600/20 text-green-500 hover:bg-green-600/40 shadow-lg shadow-green-900/20'}`}>{bill.isPaid ? <RefreshCw size={20} /> : <CheckCircle size={20} />}</button>
                       <button onClick={() => { setEditingBill(bill); setShowAddForm(true); }} className="p-2 rounded-lg bg-blue-600/20 text-blue-500 hover:bg-blue-600/40 transition-all duration-200 transform hover:scale-110"><Pencil size={20} /></button>
                       <button onClick={() => setBillToDelete(bill.id)} className="p-2 rounded-lg bg-red-600/20 text-red-500 hover:bg-red-600/40 transition-all duration-200 transform hover:scale-110"><Trash2 size={20} /></button>
                     </div>
@@ -1093,6 +1100,43 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
       
       {showAbout && renderAboutModal()}
       {showHelp && renderHelpModal()}
+      
+      {/* Bill Toggle Payment Confirmation Modal */}
+      {billToTogglePay && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="glass-panel w-full max-w-sm rounded-xl p-6 shadow-2xl border border-indigo-500/30">
+             <div className="flex flex-col items-center text-center">
+                <div className={`p-3 rounded-full mb-4 ${!billToTogglePay.isPaid ? 'bg-green-500/20' : 'bg-yellow-500/20'}`}>
+                    {!billToTogglePay.isPaid ? <CheckCircle size={32} className="text-green-500" /> : <RefreshCw size={32} className="text-yellow-500" />}
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">{!billToTogglePay.isPaid ? 'Mark as Paid?' : 'Mark as Unpaid?'}</h3>
+                
+                <p className="text-gray-300 mb-2">
+                    Are you sure you want to mark <strong>{billToTogglePay.name}</strong> as {!billToTogglePay.isPaid ? 'paid' : 'unpaid'}?
+                </p>
+
+                {billToTogglePay.isRecurring && !billToTogglePay.isPaid && (
+                    <div className="bg-indigo-500/20 p-3 rounded-lg mb-4 text-left w-full border border-indigo-500/30">
+                        <p className="text-xs text-indigo-200 flex items-start gap-2">
+                            <Info size={14} className="mt-0.5 flex-shrink-0" />
+                            <span>This is a <strong>recurring bill</strong>. Marking it as paid will automatically create a new bill for next month.</span>
+                        </p>
+                    </div>
+                )}
+
+                <div className="flex gap-3 w-full mt-4">
+                  <button onClick={() => setBillToTogglePay(null)} className="flex-1 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-medium transition">Cancel</button>
+                  <button 
+                    onClick={executeTogglePaid} 
+                    className={`flex-1 px-4 py-2 rounded-lg text-white font-medium transition shadow-lg ${!billToTogglePay.isPaid ? 'bg-green-600 hover:bg-green-700 shadow-green-500/20' : 'bg-yellow-600 hover:bg-yellow-700 shadow-yellow-500/20'}`}
+                  >
+                    Confirm
+                  </button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
 
       {billToDelete && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">

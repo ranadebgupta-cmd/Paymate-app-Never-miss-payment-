@@ -78,7 +78,14 @@ export const extractBillDetails = async (base64Data: string, mimeType: string): 
     });
 
     if (response.text) {
-      return JSON.parse(response.text) as ExtractedBillData;
+      let text = response.text.trim();
+      // Remove markdown code blocks if present (just in case the model adds them despite responseMimeType)
+      if (text.startsWith('```json')) {
+        text = text.replace(/^```json/, '').replace(/```$/, '');
+      } else if (text.startsWith('```')) {
+        text = text.replace(/^```/, '').replace(/```$/, '');
+      }
+      return JSON.parse(text) as ExtractedBillData;
     }
     return null;
   } catch (error) {

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText } from 'lucide-react';
+import { X, Calendar, Tag, Repeat, Camera, Upload, Loader2, FileText, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Bill, BillCategory } from '../types';
 import { extractBillDetails } from '../services/geminiService';
 
@@ -31,9 +31,11 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
   const [minDue, setMinDue] = useState(initialData?.minDueAmount.toString() || '');
   const [dueDate, setDueDate] = useState(initialData?.dueDate || '');
   const [isRecurring, setIsRecurring] = useState(initialData?.isRecurring || false);
+  const [showPastDueConfirm, setShowPastDueConfirm] = useState(false);
   
   // Scanning State
   const [isScanning, setIsScanning] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{type: 'success' | 'error', message: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const generateId = () => {
@@ -48,6 +50,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
     if (!file) return;
 
     setIsScanning(true);
+    setScanFeedback(null);
 
     try {
       // Convert to Base64
@@ -69,12 +72,26 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
           if (extractedData.category && CATEGORIES.includes(extractedData.category)) {
             setCategory(extractedData.category);
           }
+
+          setScanFeedback({
+            type: 'success',
+            message: "Scan complete! Please review and verify the details below before saving."
+          });
+        } else {
+           setScanFeedback({
+             type: 'error',
+             message: "Could not extract details. Please fill the form manually."
+           });
         }
         setIsScanning(false);
       };
       reader.readAsDataURL(file);
     } catch (error) {
       console.error("Scanning failed", error);
+      setScanFeedback({
+          type: 'error',
+          message: "Error processing file. Please try again."
+      });
       setIsScanning(false);
     }
     
@@ -82,8 +99,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
     e.target.value = '';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSave = () => {
     const newBill: Bill = {
       id: initialData?.id || generateId(),
       userId,
@@ -99,6 +115,23 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
     onClose();
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Check if due date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const due = new Date(dueDate);
+    due.setHours(0, 0, 0, 0);
+
+    if (due < today) {
+        setShowPastDueConfirm(true);
+        return;
+    }
+
+    executeSave();
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="glass-panel w-full max-w-lg rounded-2xl p-6 relative animate-in fade-in zoom-in duration-300 my-auto">
@@ -111,7 +144,7 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
           {initialData ? 'Edit Bill' : 'Add New Bill'}
         </h2>
 
-        {/* Scan / Upload Section - Only show for new bills to keep edit UI clean, or allow updating scan? Let's allow it. */}
+        {/* Scan / Upload Section */}
         <div 
           onClick={() => !isScanning && fileInputRef.current?.click()}
           className={`mb-6 border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${isScanning ? 'border-indigo-500 bg-indigo-500/10' : 'border-gray-600 hover:border-indigo-400 hover:bg-gray-800/50'}`}
@@ -141,6 +174,19 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
             </>
           )}
         </div>
+
+        {/* Scan Feedback Banner */}
+        {scanFeedback && (
+          <div className={`mb-6 p-4 rounded-xl flex items-start gap-3 border animate-in fade-in slide-in-from-top-2 ${scanFeedback.type === 'success' ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+            {scanFeedback.type === 'success' ? <CheckCircle2 className="text-green-400 shrink-0" size={20} /> : <AlertCircle className="text-red-400 shrink-0" size={20} />}
+            <div>
+                <h4 className={`font-bold text-sm ${scanFeedback.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+                    {scanFeedback.type === 'success' ? 'Scan Complete' : 'Scan Failed'}
+                </h4>
+                <p className="text-gray-300 text-xs mt-1 leading-relaxed">{scanFeedback.message}</p>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -238,6 +284,35 @@ export const BillForm: React.FC<Props> = ({ userId, onClose, onSave, initialData
             {initialData ? 'Update Bill' : 'Add Bill Reminder'}
           </button>
         </form>
+
+        {/* Confirmation Overlay for Past Due Date */}
+        {showPastDueConfirm && (
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-gray-900/90 backdrop-blur-sm rounded-2xl animate-in fade-in duration-200">
+            <div className="p-6 text-center max-w-xs w-full">
+              <div className="bg-yellow-500/20 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4 border border-yellow-500/50">
+                <AlertTriangle size={32} className="text-yellow-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Past Due Date</h3>
+              <p className="text-gray-300 text-sm mb-6 leading-relaxed">
+                The due date you selected (<span className="text-white font-mono">{dueDate}</span>) is in the past. Are you sure you want to save this?
+              </p>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={executeSave} 
+                  className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-xl transition shadow-lg shadow-yellow-500/20"
+                >
+                  Yes, Save Anyway
+                </button>
+                <button 
+                  onClick={() => setShowPastDueConfirm(false)} 
+                  className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition border border-gray-700"
+                >
+                  Cancel & Edit
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
