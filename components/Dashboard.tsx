@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storageService';
-import { User, Bill, NotificationItem, BillCategory, EmailConfig, Task } from '../types';
+import { User, Bill, NotificationItem, BillCategory, Task, EmailLog } from '../types';
 import { 
   Plus, CheckCircle, Trash2, LogOut, RefreshCw, 
   CreditCard, Zap, Landmark, Shield, Tv, Receipt, 
@@ -9,7 +9,8 @@ import {
   BarChart2, Settings, Search, Bell, User as UserIcon,
   Flame, Droplets, Wifi, Phone, Home as HomeIcon, Volume2, Mail, Smartphone, PieChart,
   Clock, AlertCircle, FileDown, FileSpreadsheet, Pencil, Filter, X, Save, ExternalLink,
-  ListTodo, CheckSquare, Square, Info, HelpCircle, ChevronRight, ChevronDown
+  ListTodo, CheckSquare, Square, Info, HelpCircle, ChevronRight, ChevronDown, Copy,
+  Loader2, History
 } from 'lucide-react';
 import { BillForm } from './BillForm';
 import { TaskForm } from './TaskForm';
@@ -17,7 +18,6 @@ import { NotificationToast } from './NotificationToast';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
-import emailjs from '@emailjs/browser';
 
 interface Props {
   user: User;
@@ -65,8 +65,8 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
   
   // Settings State
   const [emailNotifications, setEmailNotifications] = useState(true);
-  const [emailConfig, setEmailConfig] = useState<EmailConfig>({ serviceId: '', templateId: '', publicKey: '' });
-  const [showEmailConfig, setShowEmailConfig] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailHistory, setEmailHistory] = useState<EmailLog[]>([]);
 
   useEffect(() => {
     // Load settings
@@ -75,12 +75,12 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
       setEmailNotifications(JSON.parse(storedEmailPref));
     }
     
-    // Load Email Config
-    const storedEmailConfig = localStorage.getItem('billmate_email_config');
-    if (storedEmailConfig) {
-      setEmailConfig(JSON.parse(storedEmailConfig));
+    // Load Email History
+    const history = localStorage.getItem('paymate_email_history');
+    if (history) {
+        setEmailHistory(JSON.parse(history));
     }
-
+    
     loadBills();
     loadTasks();
 
@@ -117,43 +117,67 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     checkTaskDueDates(userTasks, isEmailEnabled);
   };
 
-  const saveEmailConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('billmate_email_config', JSON.stringify(emailConfig));
-    setNotification({
-      id: Date.now().toString(),
-      message: 'Email configuration saved!',
-      type: 'success'
-    });
-    setShowEmailConfig(false);
+  const saveEmailLog = (subject: string, status: 'sent' | 'failed') => {
+      const newLog: EmailLog = {
+          id: Date.now().toString(),
+          timestamp: new Date().toISOString(),
+          recipient: user.email,
+          subject: subject,
+          status: status
+      };
+      
+      const updatedHistory = [newLog, ...emailHistory].slice(0, 50); // Keep last 50
+      setEmailHistory(updatedHistory);
+      localStorage.setItem('paymate_email_history', JSON.stringify(updatedHistory));
   };
 
   const sendRealEmail = async (subject: string, message: string, detailAmount: string, detailDate: string) => {
-    const config = JSON.parse(localStorage.getItem('billmate_email_config') || '{}') as EmailConfig;
-    
-    if (!config.serviceId || !config.templateId || !config.publicKey) {
-       // Only warn once per session in console to avoid spam
-       return false; 
+    if (!user.email || !user.email.includes('@')) {
+        console.warn("Invalid email address for user");
+        return false;
     }
 
+    // Sanitize email
+    const recipient = user.email.trim();
+
     try {
-      await emailjs.send(
-        config.serviceId,
-        config.templateId,
-        {
-          to_name: user.name,
-          to_email: user.email,
-          message: message,
-          bill_name: subject, // Reusing bill_name field for subject title
-          amount: detailAmount,
-          due_date: detailDate,
-          subject: subject
+      console.log(`Attempting to send email to ${recipient}...`);
+      
+      const payload = {
+            _subject: subject,
+            _template: 'table',
+            _captcha: "false", // Must be string "false" for some APIs, CRITICAL to skip captcha
+            _honey: "", // Anti-spam field, leave empty
+            // Data Fields
+            "Alert Details": message,
+            "Amount Due": `₹${detailAmount}`,
+            "Due Date": detailDate,
+            "Sent Via": "Paymate App"
+      };
+
+      const response = await fetch(`https://formsubmit.co/ajax/${recipient}`, {
+        method: "POST",
+        headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         },
-        config.publicKey
-      );
-      return true;
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+      console.log("Email Result:", result);
+      
+      if (response.ok) {
+          saveEmailLog(subject, 'sent');
+          return true;
+      } else {
+          console.error("Email API Error:", result);
+          saveEmailLog(subject, 'failed');
+          return false;
+      }
     } catch (error) {
-      console.error("EmailJS Error:", error);
+      console.error("Email Network Error:", error);
+      saveEmailLog(subject, 'failed');
       return false;
     }
   };
@@ -387,19 +411,24 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
 
   const handleTestAlert = async () => {
     const msg = 'This is a test alert from Paymate.';
-    if (emailNotifications) {
-         const success = await sendRealEmail("Test Alert", "This is a test email.", "0.00", new Date().toISOString().split('T')[0]);
-         if (success) {
-            setNotification({ id: Date.now().toString(), message: 'Test email sent successfully!', type: 'success' });
-         } else {
-             setNotification({ id: Date.now().toString(), message: 'Test email failed. Check config.', type: 'warning' });
-         }
-    } else {
-         setNotification({ id: Date.now().toString(), message: 'Test audio alert played', type: 'info' });
-    }
     
     if (Notification.permission === "granted") {
        new Notification("Paymate Test", { body: msg, icon: "https://cdn-icons-png.flaticon.com/512/10543/10543329.png" });
+    }
+
+    if (emailNotifications) {
+         setNotification({ id: Date.now().toString(), message: 'Sending test email to ' + user.email + '...', type: 'info' });
+         setIsSendingEmail(true);
+         const success = await sendRealEmail("Test Alert", "This is a test email from Paymate to verify your setup.", "0.00", new Date().toISOString().split('T')[0]);
+         setIsSendingEmail(false);
+         
+         if (success) {
+            setNotification({ id: Date.now().toString(), message: 'Email Sent! Check your SPAM folder for "Activate FormSubmit".', type: 'success' });
+         } else {
+             setNotification({ id: Date.now().toString(), message: 'Test email failed. Check settings/network.', type: 'warning' });
+         }
+    } else {
+         setNotification({ id: Date.now().toString(), message: 'Test audio alert played (Email disabled)', type: 'info' });
     }
   };
 
@@ -407,9 +436,11 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
     const todayStr = new Date().toISOString().split('T')[0];
     localStorage.removeItem(`billmate_alerts_freq_${todayStr}`); // Clear new key
     localStorage.removeItem(`paymate_task_alerts`);
+    setEmailHistory([]); // Clear history
+    localStorage.removeItem('paymate_email_history');
     setNotification({
         id: Date.now().toString(),
-        message: 'Alert history cleared.',
+        message: 'Alert & Email history cleared.',
         type: 'success'
     });
   };
@@ -565,7 +596,7 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
          <div className="space-y-1 mb-8">
            <h3 className="font-bold text-white mb-3 text-lg">Frequently Asked Questions</h3>
            <FAQItem question="How do I scan a bill?" answer="Go to the Bills tab and click the '+' button. In the form, tap the 'Scan Bill' box to take a photo or upload a PDF. Our AI will automatically extract the details for you." />
-           <FAQItem question="Why are email alerts not working?" answer="Paymate uses EmailJS for real emails. Go to Settings > Email Notification Setup to enter your Service ID, Template ID, and Public Key. Without this, only simulated on-screen alerts will appear." />
+           <FAQItem question="Why are email alerts not working?" answer="We use a secure service to send alerts to your registered email. Check your inbox (and spam folder) for an 'Action Required' or 'Activate FormSubmit' email. You must click 'Activate' once for the first email to start receiving alerts." />
            <FAQItem question="Is my data secure?" answer="Yes! Paymate stores all your financial data locally on your device using LocalStorage. We do not have a backend database, so your private information never leaves your phone unless you enable email alerts." />
            <FAQItem question="How do I install the app?" answer="On Android, tap 'Install' when prompted or use the Chrome menu 'Install App'. On iOS, tap the 'Share' button in Safari and select 'Add to Home Screen'." />
             <FAQItem question="How do recurring bills work?" answer="When adding a bill, check 'Repeat Monthly'. Once you mark that bill as 'Paid', a new bill for the next month is automatically created with the same details." />
@@ -895,32 +926,65 @@ export const Dashboard: React.FC<Props> = ({ user, onLogout }) => {
         {activeTab === 'settings' && (
             <div className="glass-panel p-6 rounded-2xl space-y-4 animate-in fade-in pb-24">
                 <h2 className="text-xl font-bold mb-4">Settings</h2>
-                <div className="bg-gradient-to-r from-gray-800 to-gray-900 border border-gray-700 p-5 rounded-xl">
-                    <div className="flex items-center justify-between mb-3">
-                         <div className="flex items-center gap-2 text-indigo-300 font-semibold"><Mail size={18} /> Email Notification Setup</div>
-                         <button onClick={() => setShowEmailConfig(!showEmailConfig)} className="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full text-white">{showEmailConfig ? 'Hide Config' : 'Configure'}</button>
-                    </div>
-                    {showEmailConfig ? (
-                        <form onSubmit={saveEmailConfig} className="space-y-3 mt-4 animate-in fade-in slide-in-from-top-2">
-                             <div className="text-xs text-gray-400 mb-2 p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">To enable real emails, sign up at <a href="https://www.emailjs.com/" target="_blank" className="text-indigo-400 hover:underline">EmailJS.com</a>.</div>
-                             <div><label className="text-xs text-gray-400 block mb-1">Service ID</label><input type="text" value={emailConfig.serviceId} onChange={e => setEmailConfig({...emailConfig, serviceId: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none" placeholder="service_xxxxxx" /></div>
-                             <div><label className="text-xs text-gray-400 block mb-1">Template ID</label><input type="text" value={emailConfig.templateId} onChange={e => setEmailConfig({...emailConfig, templateId: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none" placeholder="template_xxxxxx" /></div>
-                             <div><label className="text-xs text-gray-400 block mb-1">Public Key</label><input type="text" value={emailConfig.publicKey} onChange={e => setEmailConfig({...emailConfig, publicKey: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm focus:border-indigo-500 outline-none" placeholder="user_xxxxxx" /></div>
-                             <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm py-2 rounded-lg flex items-center justify-center gap-2"><Save size={16} /> Save Email Config</button>
-                        </form>
-                    ) : (
-                         <p className="text-sm text-gray-400">{emailConfig.serviceId ? '✅ Email service configured.' : '⚠️ Using simulated emails.'}</p>
-                    )}
+                
+                <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
+                    <div className="flex items-center gap-2 text-indigo-300 font-semibold mb-2"><Mail size={18} /> Email Alerts</div>
+                    <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+                        We use a free secure service to send alerts directly to <strong>{user.email}</strong>. 
+                        <br/><br/>
+                        <span className="text-yellow-400">Important:</span> The first time you trigger a test alert, check your inbox (or spam) for an "Activate FormSubmit" email. You must click Activate once to start receiving future notifications.
+                    </p>
                 </div>
+
                 <div onClick={toggleEmailNotifications} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-xl cursor-pointer hover:bg-gray-800 transition">
                     <div className="flex items-center gap-3"><div className={`p-2 rounded-lg ${emailNotifications ? 'bg-indigo-500/20 text-indigo-400' : 'bg-gray-700 text-gray-400'}`}><Mail size={20} /></div><div><span className="block font-medium">Email Alerts</span><span className="text-xs text-gray-400">Get notified for bills & tasks</span></div></div>
                     <div className={`w-12 h-6 rounded-full relative transition-colors ${emailNotifications ? 'bg-indigo-600' : 'bg-gray-600'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${emailNotifications ? 'right-1' : 'left-1'}`}></div></div>
                 </div>
+
                 <div onClick={requestNotificationPermission} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-xl cursor-pointer hover:bg-gray-800 transition">
                     <div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-pink-500/20 text-pink-400"><Smartphone size={20} /></div><div><span className="block font-medium">Push Notifications</span><span className="text-xs text-gray-400">Enable device alerts</span></div></div>
                      <span className="text-xs text-pink-400 font-bold px-3 py-1 bg-pink-500/10 rounded-full">ENABLE</span>
                 </div>
-                <button onClick={handleTestAlert} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400"><Volume2 size={20} /></div><span>Test Alert Sound & Email</span></div><span className="text-xs text-indigo-400 font-bold">TEST</span></button>
+                
+                <button 
+                    onClick={handleTestAlert} 
+                    disabled={isSendingEmail}
+                    className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
+                             {isSendingEmail ? <Loader2 size={20} className="animate-spin" /> : <Volume2 size={20} />}
+                        </div>
+                        <span>{isSendingEmail ? 'Sending...' : 'Send Test Alert / Email'}</span>
+                    </div>
+                    <span className="text-xs text-indigo-400 font-bold">TEST</span>
+                </button>
+                
+                {/* Email History Section */}
+                <div className="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
+                    <div className="flex items-center gap-2 mb-3 text-white font-medium">
+                        <History size={18} className="text-gray-400" /> 
+                        Email History <span className="text-xs font-normal text-gray-500">(Stored Locally)</span>
+                    </div>
+                    {emailHistory.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic">No emails sent yet.</p>
+                    ) : (
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-2 no-scrollbar">
+                            {emailHistory.map(log => (
+                                <div key={log.id} className="flex items-center justify-between text-xs p-2 bg-gray-800/50 rounded-lg">
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-gray-300 font-medium">{log.subject}</span>
+                                        <span className="text-gray-500">{new Date(log.timestamp).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
+                                    </div>
+                                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${log.status === 'sent' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                        {log.status}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <button onClick={resetDailyAlerts} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition"><div className="flex items-center gap-3"><div className="p-2 rounded-lg bg-orange-500/20 text-orange-400"><RefreshCw size={20} /></div><span>Reset Alert History</span></div><span className="text-xs text-orange-400 font-bold">RESET</span></button>
                 
                 <button onClick={() => setShowHelp(true)} className="w-full flex items-center justify-between p-4 bg-gray-800/50 rounded-xl hover:bg-gray-800 transition">

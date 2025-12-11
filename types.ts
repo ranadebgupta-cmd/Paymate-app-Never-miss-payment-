@@ -48,8 +48,10 @@ export interface NotificationItem {
   type: 'warning' | 'info' | 'success';
 }
 
-export interface EmailConfig {
-  serviceId: string;
-  templateId: string;
-  publicKey: string;
+export interface EmailLog {
+  id: string;
+  timestamp: string;
+  recipient: string;
+  subject: string;
+  status: 'sent' | 'failed';
 }
